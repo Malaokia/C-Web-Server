@@ -11,7 +11,7 @@
 #define MAX_CLIENTS 32
 #define MAX_DATA 1024
 
-int setup_socket (const char *port_number, int max_clients);
+int setup_socket (int port_number, int max_clients);
 void setup_server ();
 
 
@@ -34,7 +34,7 @@ int main(int argc, char ** argv)
   printf("about to call setup_server\n");
   setup_server(&system_config_data); 
   printf("About to call setup_socket!!!\n");
-  //main_socket = setup_socket(system_config_data.port_number, MAX_CLIENTS);
+  main_socket = setup_socket(system_config_data.port_number, MAX_CLIENTS);
 
   char response[] = "HTTP/1.1 200 OK\r\n"
     "Content-Type: text/html; charset=UTF-8\r\n\r\n"
@@ -105,7 +105,7 @@ void setup_server(struct TextfileData *config_data)
  * setup_socket - allocate and bind a server socket using TCP, then have it listen on the port
  *----------------------------------------------------------------------------------------------
  */
-int setup_socket(const char *port_number, int max_clients)
+int setup_socket(int port_number, int max_clients)
 {
   printf("At the beginning of setup_socket()");
 
@@ -118,7 +118,7 @@ int setup_socket(const char *port_number, int max_clients)
   /* Socket family is INET (used for Internet sockets) */
   server.sin_family = AF_INET;
   /* Apply the htons command to convert byte ordering of port number into Network Byte Ordering (Big Endian) */
-  server.sin_port = htons((unsigned short)atoi(port_number));
+  server.sin_port = htons(port_number);
   /* Allow any IP address within the local configuration of the server to have access */
   server.sin_addr.s_addr = INADDR_ANY;
   /* Zero off remaining sockaddr_in structure so that it is the right size */
