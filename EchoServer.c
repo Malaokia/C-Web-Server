@@ -10,9 +10,15 @@
 #define ERROR -1
 #define MAX_CLIENTS 32
 #define MAX_DATA 1024
+#define MAX_PATH_LENGTH 512
 
 /* TODO */
 /*
+ *
+ *  have extraction function also extract the HTTP method and the HTTP version 
+ *
+ *
+ *
  * >>> Setup Up Config File Reading/Extacting
  * 1.) Open file in existing filepath/directory (ws.conf), read it line by line
  * 2.) After reading lines from file, extract fields that we need (regex? string search?)
@@ -66,7 +72,7 @@ int main(int argc, char ** argv)
   unsigned int sockaddr_len = sizeof(struct sockaddr_in);
   int data_len;
   char data[MAX_DATA];
-  char file_path[6];
+  char file_path[MAX_PATH_LENGTH];
 
   setup_server(&system_config_data); 
   main_socket = setup_socket(system_config_data.port_number, MAX_CLIENTS);
@@ -98,6 +104,17 @@ int main(int argc, char ** argv)
  */
 void interpret_request(char *path) {
 
+  printf("Beginning of: interpret_request()\n");
+  printf("here is the passed in path:%s\n", path);
+
+  if ( (strcmp(path, "\r")) == 0)
+    printf("Empty Path!!");
+  else
+    printf("We have a path!!");
+  
+
+
+  printf("Leaving: interpret_request()\n");
 
 }
 
@@ -118,15 +135,15 @@ void extract_request_path(char *response, char *return_path) {
   // after this returns, return_path contains the first token while saveptr is a reference to the remaining tokens 
   the_path = strtok_r(response, "\n", &saveptr);
   removeSubstring(the_path, "HTTP/1.1");
-  printf( "First Token after seperating response by newline: \n%s\n", the_path);
+  //printf( "First Token after seperating response by newline: \n%s\n", the_path);
   //printf( "Remaining Tokens after seperating response by newline: \n%s\n", saveptr);
 
   the_path = strtok_r(the_path, "/", &saveptr);
-  printf( "First token after seperation by slash character: \n%s\n", the_path );
+  //printf( "First token after seperation by slash character: \n%s\n", the_path );
   //printf( "Remaining tokens after seperation by slash character: \n%s\n", saveptr );
 
   the_path = strtok_r(NULL, " ", &saveptr);
-  printf( "Second token after seperation by slash character: %s\n", the_path );
+  //printf( "Second token after seperation by slash character: %s\n", the_path );
   //printf( "Remaining tokens after seperation by slash character: \n%s\n", saveptr );
   printf("Leaving: extract_request_path()\n");
   strcpy(return_path, the_path);
