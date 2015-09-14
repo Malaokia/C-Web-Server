@@ -8,6 +8,7 @@
 #include<unistd.h>
 #include<arpa/inet.h>
 #include<pthread.h>
+#include<sys/stat.h>
 #define ERROR -1
 #define MAX_CLIENTS 32
 #define MAX_DATA 1024
@@ -56,14 +57,14 @@ struct TextfileData {
   char *default_web_page;
 };
 
+void send_response(int client, char *body);
+int handle_file_serving(char *path, char *body);
 void *client_handler(void *client);
-void interpret_request(char *path, int *decision);
-//void extract_request_path(char *response, char *return_path);
+void interpret_request(struct HTTP_RequestParams *params, int *decision);
 void extract_request_path(char *response, struct HTTP_RequestParams *params);
 void removeSubstring(char *s,const char *toremove);
 int setup_socket (int port_number, int max_clients);
 void setup_server(struct TextfileData *config_data);
-//void setup_server ();
 
 int main(int argc, char ** argv)
 {
@@ -83,8 +84,7 @@ int main(int argc, char ** argv)
   main_socket = setup_socket(system_config_data.port_number, MAX_CLIENTS);
 
 
-  while (1)
-  {
+  while (1) {
     if ((cli = accept(main_socket, (struct sockaddr *)&client, &sockaddr_len)) == ERROR) {
       perror("accept");
       exit(-1);
@@ -106,11 +106,6 @@ void *client_handler(void *client) {
   int what_to_do;
   printf("Beginning of (thread): client_handler()\n");
 
-  char bad_response[] = "HTTP/1.1 404 Not Found\r\n"
-    "Content-Type: text/html; charset=UTF-8\r\n\r\n"
-    "<!DOCTYPE html><html><head><title>404 Error</title>"
-    "<body><h1>404 Error</h1></body></html>\r\n";
-
   char response[] = "HTTP/1.1 200 OK\r\n"
     "Content-Type: text/html; charset=UTF-8\r\n\r\n"
     "<!DOCTYPE html><html><head><title>Bye-bye baby bye-bye</title>"
@@ -121,6 +116,7 @@ void *client_handler(void *client) {
   int cli = *(int *)client;
   int data_len;
   char data[MAX_DATA];
+  char file_response[MAX_DATA];
   char file_path[MAX_PATH_LENGTH];
   data_len = recv(cli, data, MAX_DATA, 0);
   if (data_len) {
@@ -129,15 +125,52 @@ void *client_handler(void *client) {
     printf("METHOD: %s\n", request_params.method);
     printf("URI: %s\n", request_params.URI);
     printf("VERSION: %s\n", request_params.httpversion);
-    interpret_request((char *)&file_path, &what_to_do);
-    if (what_to_do == 0)
-      write(cli, bad_response, sizeof(bad_response) -1);
-    else
-      write(cli, response, sizeof(response) -1);
+    if ((handle_file_serving((char *)&request_params.URI, (char *)&file_response)) == 1) {
+      printf("File wasn't found, need to print 404...\n");
+      send_response(cli, (char *)&file_response);
+    }
     printf("Client disconnected\n");
     close(cli);
   }
   return 0;
+}
+/*--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ * send_response - this function will be the function that actually sends a message to the client. This message will contain the proper headers and the respective body content
+ *--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ */
+void send_response(int client, char *body) {
+
+  char bad_response[] = "HTTP/1.1 404 Not Found\r\n Content-Type: text/html; charset=UTF-8\r\n\r\n <!DOCTYPE html><html><head><title>404 Error</title> <body><h1>404 Error</h1></body></html>\r\n";
+  printf("Beginning of: send_response()\n");
+  printf("This is what the body is returning: %s\n", body);
+  //write(client, body, sizeof(body) -1);
+  write(client, bad_response, sizeof(bad_response) -1);
+  printf("Leaving: send_response()\n");
+
+
+}
+
+/*--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ * handle_file_serving - this function will take in a file path, and either construct the correct response body to serve up that file or it will return false if the file does not exist
+ *--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ */
+int handle_file_serving(char *path, char *body) {
+  printf("Beginning of: handle_file_serving()\n");
+
+  char bad_response[] = "HTTP/1.1 404 Not Found\r\n Content-Type: text/html; charset=UTF-8\r\n\r\n <!DOCTYPE html><html><head><title>404 Error</title> <body><h1>404 Error</h1></body></html>\r\n";
+  struct stat buffer;
+  if ((stat ("www/images/weome.png", &buffer) == 0)) {
+    printf("YAY FILE EXISTS\n");
+    printf("Time to construct the file and serve it up...");
+    return 0;
+  }
+  else{
+    printf("File not found\n");
+    strcpy(body, bad_response);
+    return 1;
+  }
+  printf("Leaving: handle_file_serving()\n");
+
 }
 
 
@@ -145,12 +178,11 @@ void *client_handler(void *client) {
  * interpret_request - this function will be take the users path and decide what to do based on the result
  *-------------------------------------------------------------------------------------------------------------------------------------------
  */
-void interpret_request(char *path, int *decision) {
+void interpret_request(struct HTTP_RequestParams *params, int *decision) {
 
   printf("Beginning of: interpret_request()\n");
-  printf("here is the passed in path:%s\n", path);
 
-  if ( (strcmp(path, "\r")) == 0)
+  if ( (strcmp(params->URI, "/")) == 0)
   {
     printf("Empty Path!!");
     *decision = 0;
@@ -178,20 +210,20 @@ void extract_request_path(char *response, struct HTTP_RequestParams *params) {
   // after this returns, return_path contains the first token while saveptr is a reference to the remaining tokens 
   the_path = strtok_r(response, "\n", &saveptr);
   //removeSubstring(the_path, "HTTP/1.1");
-  printf( "First Token after seperating response by newline: \n%s\n", the_path);
-  printf( "Remaining Tokens after seperating response by newline: \n%s\n", saveptr);
+  //printf( "First Token after seperating response by newline: \n%s\n", the_path);
+  //printf( "Remaining Tokens after seperating response by newline: \n%s\n", saveptr);
 
   the_path = strtok_r(the_path, " ", &saveptr);
   params->method = the_path;
-  printf( "First token after seperation by space character: \n%s\n", the_path );
-  printf( "Remaining tokens after seperation by space character: \n%s\n", saveptr );
+  //printf( "First token after seperation by space character: \n%s\n", the_path );
+  //printf( "Remaining tokens after seperation by space character: \n%s\n", saveptr );
 
   the_path = strtok_r(NULL, " ", &saveptr);
-  printf( "Second token after seperation by space character: %s\n", the_path );
+  //printf( "Second token after seperation by space character: %s\n", the_path );
   params->URI = the_path;
-  printf( "Remaining tokens after second seperation by space character: \n%s\n", saveptr );
+  //printf( "Remaining tokens after second seperation by space character: \n%s\n", saveptr );
   params->httpversion = saveptr;
-  printf("Leaving: extract_request_path()\n");
+  //printf("Leaving: extract_request_path()\n");
 }
 
 /*-------------------------------------------------------------------------------------------------------------------------------------------
