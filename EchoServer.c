@@ -7,6 +7,7 @@
 #include<errno.h>
 #include<unistd.h>
 #include<arpa/inet.h>
+#include<pthread.h>
 #define ERROR -1
 #define MAX_CLIENTS 32
 #define MAX_DATA 1024
@@ -18,6 +19,8 @@
  *  have extraction function also extract the HTTP method and the HTTP version 
  *
  *
+ *
+
  *
  * >>> Setup Up Config File Reading/Extacting
  * 1.) Open file in existing filepath/directory (ws.conf), read it line by line
@@ -40,11 +43,12 @@
  * >>> Design logic for when to display 404 and when to display static index page based on URL
 
 */
-void interpret_request(char *path);
-void removeSubstring(char *s,const char *toremove);
-void extract_request_path(char *response, char *file_path);
-int setup_socket (int port_number, int max_clients);
-void setup_server ();
+
+struct HTTP_RequestParams {
+  char *method;
+  char *URI;
+  char *httpversion;
+};
 
 struct TextfileData {
   int port_number;
@@ -52,27 +56,28 @@ struct TextfileData {
   char *default_web_page;
 };
 
+void *client_handler(void *client);
+void interpret_request(char *path, int *decision);
+//void extract_request_path(char *response, char *return_path);
+void extract_request_path(char *response, struct HTTP_RequestParams *params);
+void removeSubstring(char *s,const char *toremove);
+int setup_socket (int port_number, int max_clients);
+void setup_server(struct TextfileData *config_data);
+//void setup_server ();
+
 int main(int argc, char ** argv)
 {
   printf("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n");
   printf("| Welcome to this wonderful C server! |\n");
   printf("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n");
 
-  char response[] = "HTTP/1.1 200 OK\r\n"
-    "Content-Type: text/html; charset=UTF-8\r\n\r\n"
-    "<!DOCTYPE html><html><head><title>Bye-bye baby bye-bye</title>"
-    "<style>body { background-color: #111 }"
-    "h1 { font-size:4cm; text-align: center; color: black;"
-    " text-shadow: 0 0 2mm blue}</style></head>"
-    "<body><h1>Hello World</h1></body></html>\r\n";
   int main_socket;
   struct TextfileData system_config_data;
   struct sockaddr_in client;
   int cli;
   unsigned int sockaddr_len = sizeof(struct sockaddr_in);
-  int data_len;
-  char data[MAX_DATA];
-  char file_path[MAX_PATH_LENGTH];
+
+  pthread_t thread_id;
 
   setup_server(&system_config_data); 
   main_socket = setup_socket(system_config_data.port_number, MAX_CLIENTS);
@@ -84,17 +89,55 @@ int main(int argc, char ** argv)
       perror("accept");
       exit(-1);
     }
-    printf("New Client connected from port number %d and IP %s\n\n", ntohs(client.sin_port), inet_ntoa(client.sin_addr));
+    printf("New Client connected from port number %d and IP %s\n", ntohs(client.sin_port), inet_ntoa(client.sin_addr));
 
-    data_len = recv(cli, data, MAX_DATA, 0);
-    if (data_len) {
-      extract_request_path((char *)&data, (char *)&file_path);
-      interpret_request((char *)&file_path);
-      write(cli, response, sizeof(response) -1);
-      printf("Client disconnected\n");
-      close(cli);
+    if (pthread_create( &thread_id, NULL, client_handler, &cli) < 0) {
+      perror("could not create thread");
+      exit(-1);
     }
+    pthread_join (thread_id, NULL);
+
   }
+}
+
+void *client_handler(void *client) {
+
+  struct HTTP_RequestParams request_params;
+  int what_to_do;
+  printf("Beginning of (thread): client_handler()\n");
+
+  char bad_response[] = "HTTP/1.1 404 Not Found\r\n"
+    "Content-Type: text/html; charset=UTF-8\r\n\r\n"
+    "<!DOCTYPE html><html><head><title>404 Error</title>"
+    "<body><h1>404 Error</h1></body></html>\r\n";
+
+  char response[] = "HTTP/1.1 200 OK\r\n"
+    "Content-Type: text/html; charset=UTF-8\r\n\r\n"
+    "<!DOCTYPE html><html><head><title>Bye-bye baby bye-bye</title>"
+    "<style>body { background-color: #111 }"
+    "h1 { font-size:4cm; text-align: center; color: black;"
+    " text-shadow: 0 0 2mm blue}</style></head>"
+    "<body><h1>Hello World</h1></body></html>\r\n";
+  int cli = *(int *)client;
+  int data_len;
+  char data[MAX_DATA];
+  char file_path[MAX_PATH_LENGTH];
+  data_len = recv(cli, data, MAX_DATA, 0);
+  if (data_len) {
+    extract_request_path((char *)&data, &request_params);
+    printf("Here are the results of parsing the request body and reading the data into our struct:::\n");
+    printf("METHOD: %s\n", request_params.method);
+    printf("URI: %s\n", request_params.URI);
+    printf("VERSION: %s\n", request_params.httpversion);
+    interpret_request((char *)&file_path, &what_to_do);
+    if (what_to_do == 0)
+      write(cli, bad_response, sizeof(bad_response) -1);
+    else
+      write(cli, response, sizeof(response) -1);
+    printf("Client disconnected\n");
+    close(cli);
+  }
+  return 0;
 }
 
 
@@ -102,52 +145,53 @@ int main(int argc, char ** argv)
  * interpret_request - this function will be take the users path and decide what to do based on the result
  *-------------------------------------------------------------------------------------------------------------------------------------------
  */
-void interpret_request(char *path) {
+void interpret_request(char *path, int *decision) {
 
   printf("Beginning of: interpret_request()\n");
   printf("here is the passed in path:%s\n", path);
 
   if ( (strcmp(path, "\r")) == 0)
+  {
     printf("Empty Path!!");
-  else
+    *decision = 0;
+  }
+  else {
     printf("We have a path!!");
-  
+    *decision = 1;
+  }
+
 
 
   printf("Leaving: interpret_request()\n");
 
 }
-
-
-
 /*-------------------------------------------------------------------------------------------------------------------------------------------
  * extract_request_path - this function will be mainly responsible for parsing and extracting the path from the HTTP request from the client
  *-------------------------------------------------------------------------------------------------------------------------------------------
  */
-void extract_request_path(char *response, char *return_path) {
-
-
+//void extract_request_path(char *response, char *return_path) {
+void extract_request_path(char *response, struct HTTP_RequestParams *params) {
   printf("Beginning of: extract_request_path()\n");
   char *saveptr;
   char *the_path;
 
-
   // after this returns, return_path contains the first token while saveptr is a reference to the remaining tokens 
   the_path = strtok_r(response, "\n", &saveptr);
-  removeSubstring(the_path, "HTTP/1.1");
-  //printf( "First Token after seperating response by newline: \n%s\n", the_path);
-  //printf( "Remaining Tokens after seperating response by newline: \n%s\n", saveptr);
+  //removeSubstring(the_path, "HTTP/1.1");
+  printf( "First Token after seperating response by newline: \n%s\n", the_path);
+  printf( "Remaining Tokens after seperating response by newline: \n%s\n", saveptr);
 
-  the_path = strtok_r(the_path, "/", &saveptr);
-  //printf( "First token after seperation by slash character: \n%s\n", the_path );
-  //printf( "Remaining tokens after seperation by slash character: \n%s\n", saveptr );
+  the_path = strtok_r(the_path, " ", &saveptr);
+  params->method = the_path;
+  printf( "First token after seperation by space character: \n%s\n", the_path );
+  printf( "Remaining tokens after seperation by space character: \n%s\n", saveptr );
 
   the_path = strtok_r(NULL, " ", &saveptr);
-  //printf( "Second token after seperation by slash character: %s\n", the_path );
-  //printf( "Remaining tokens after seperation by slash character: \n%s\n", saveptr );
+  printf( "Second token after seperation by space character: %s\n", the_path );
+  params->URI = the_path;
+  printf( "Remaining tokens after second seperation by space character: \n%s\n", saveptr );
+  params->httpversion = saveptr;
   printf("Leaving: extract_request_path()\n");
-  strcpy(return_path, the_path);
-
 }
 
 /*-------------------------------------------------------------------------------------------------------------------------------------------
