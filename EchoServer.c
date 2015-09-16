@@ -12,39 +12,23 @@
 #define ERROR -1
 #define MAX_CLIENTS 32
 #define MAX_DATA 1024
+#define MAX_RESPONSE 1024*1024
 #define MAX_PATH_LENGTH 512
 
-/* TODO */
-/*
- *
- *  have extraction function also extract the HTTP method and the HTTP version 
- *
- *
- *
+#define NUM_THREADS 4
 
- *
- * >>> Setup Up Config File Reading/Extacting
- * 1.) Open file in existing filepath/directory (ws.conf), read it line by line
- * 2.) After reading lines from file, extract fields that we need (regex? string search?)
- * 3.) Populate our TextfileData struct with the fields that we extact from the conf file
- * 4.) Using the data in our struct, set the variables for the server accordingly
- *
- * >>> Find out how to serve file content to client
- *1.) Read/learn how the response body/header needs to be structured for different kinds of file types
- *2.) Learn how to navigate directory structures (does file exist, get this file, etc) in C
- *3.) Start with trying to serve up static html page
- *3.) 
 
- * >>> Find out / create function that will parse the request URL and:
- *   - decide if it is a valid URL
- *   - parse out the method type
- *   - parse out the version of HTML
- *   - parse out the file that is requested
- *
- * >>> Design logic for when to display 404 and when to display static index page based on URL
+#define NOT_FOUND 404
+#define BAD_METHOD 4040
+#define BAD_URI 4041
+#define BAD_HTTP_VERSION 4042
 
-*/
 
+/*--------------/
+ * HEADER STUFF
+ *--------------*/
+
+/* Struct Definitions */
 struct HTTP_RequestParams {
   char *method;
   char *URI;
@@ -57,14 +41,17 @@ struct TextfileData {
   char *default_web_page;
 };
 
-void send_response(int client, char *body);
+/* Function Declarations */
+void send_response(int client, int status_code, struct HTTP_RequestParams *params);
 int handle_file_serving(char *path, char *body);
-void *client_handler(void *client);
+void client_handler(int client);
 void interpret_request(struct HTTP_RequestParams *params, int *decision);
 void extract_request_path(char *response, struct HTTP_RequestParams *params);
 void removeSubstring(char *s,const char *toremove);
 int setup_socket (int port_number, int max_clients);
 void setup_server(struct TextfileData *config_data);
+
+
 
 int main(int argc, char ** argv)
 {
@@ -72,39 +59,54 @@ int main(int argc, char ** argv)
   printf("| Welcome to this wonderful C server! |\n");
   printf("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n");
 
+
   int main_socket;
+  int pid;
   struct TextfileData system_config_data;
   struct sockaddr_in client;
   int cli;
   unsigned int sockaddr_len = sizeof(struct sockaddr_in);
 
-  pthread_t thread_id;
 
   setup_server(&system_config_data); 
   main_socket = setup_socket(system_config_data.port_number, MAX_CLIENTS);
 
+  while (1)  {
 
-  while (1) {
-    if ((cli = accept(main_socket, (struct sockaddr *)&client, &sockaddr_len)) == ERROR) {
-      perror("accept");
-      exit(-1);
+    if ( (cli = accept(main_socket, (struct sockaddr *)&client, &sockaddr_len)) < 0) {
+      perror("ERROR on accept");
+      exit(1);
     }
+
     printf("New Client connected from port number %d and IP %s\n", ntohs(client.sin_port), inet_ntoa(client.sin_addr));
 
-    if (pthread_create( &thread_id, NULL, client_handler, &cli) < 0) {
-      perror("could not create thread");
-      exit(-1);
+    pid = fork();
+    if (pid < 0){
+      perror("ERROR on fork");
+      exit(1);
     }
-    pthread_join (thread_id, NULL);
 
+    if (pid == 0) {
+      printf("HAHA I am the child aka client process");
+      close(main_socket);
+      client_handler(cli);
+      exit(0);
+    }
+
+    if (pid > 0) {
+      printf("I am the parent id");
+      close(cli);
+    }
   }
 }
 
-void *client_handler(void *client) {
+void client_handler(int client) {
+
+  printf("Hello from process %d\n", (int) getpid());
+  printf("Beginning of (process): client_handler()\n");
 
   struct HTTP_RequestParams request_params;
   int what_to_do;
-  printf("Beginning of (thread): client_handler()\n");
 
   char response[] = "HTTP/1.1 200 OK\r\n"
     "Content-Type: text/html; charset=UTF-8\r\n\r\n"
@@ -113,38 +115,59 @@ void *client_handler(void *client) {
     "h1 { font-size:4cm; text-align: center; color: black;"
     " text-shadow: 0 0 2mm blue}</style></head>"
     "<body><h1>Hello World</h1></body></html>\r\n";
-  int cli = *(int *)client;
+  int cli = client;
   int data_len;
   char data[MAX_DATA];
   char file_response[MAX_DATA];
   char file_path[MAX_PATH_LENGTH];
+
   data_len = recv(cli, data, MAX_DATA, 0);
   if (data_len) {
+    //printf("Request received of size: %zd\n", data_len);
+    //printf("Request: \n%s\n", data);
     extract_request_path((char *)&data, &request_params);
     printf("Here are the results of parsing the request body and reading the data into our struct:::\n");
     printf("METHOD: %s\n", request_params.method);
     printf("URI: %s\n", request_params.URI);
     printf("VERSION: %s\n", request_params.httpversion);
-    if ((handle_file_serving((char *)&request_params.URI, (char *)&file_response)) == 1) {
+    write(cli, response, sizeof(response) -1);
+    /*if ((handle_file_serving((char *)&request_params.URI, (char *)&file_response)) == 1) {
       printf("File wasn't found, need to print 404...\n");
-      send_response(cli, (char *)&file_response);
+      send_response(cli, 404, &request_params);
     }
-    printf("Client disconnected\n");
-    close(cli);
+    */
   }
-  return 0;
 }
 /*--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  * send_response - this function will be the function that actually sends a message to the client. This message will contain the proper headers and the respective body content
  *--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  */
-void send_response(int client, char *body) {
-
-  char bad_response[] = "HTTP/1.1 404 Not Found\r\n Content-Type: text/html; charset=UTF-8\r\n\r\n <!DOCTYPE html><html><head><title>404 Error</title> <body><h1>404 Error</h1></body></html>\r\n";
+void send_response(int client, int status_code, struct HTTP_RequestParams *params) {
   printf("Beginning of: send_response()\n");
-  printf("This is what the body is returning: %s\n", body);
+  char actual_response [MAX_RESPONSE];
+
+  char not_found[] = "HTTP/1.1 404 Not Found: %s\r\n Content-Type: text/html; charset=UTF-8\r\n\r\n <!DOCTYPE html><html><head><title>404 Error</title> <body><h1>404 Not Found</h1></body></html>\r\n";
+  char invalid_uri[] = "HTTP/1.1 400 Bad Request: Invalid URI: %s\r\n Content-Type: text/html; charset=UTF-8\r\n\r\n <!DOCTYPE html><html><head><title>400 Bad Request</title> <body><h1>400 Bad Request</h1></body></html>\r\n";
+  char invalid_method[] = "HTTP/1.1 400 Bad Request: Invalid Method: %s\r\n Content-Type: text/html; charset=UTF-8\r\n\r\n <!DOCTYPE html><html><head><title>400 Bad Request</title> <body><h1>400 Bad Request</h1></body></html>\r\n";
+  char invalid_version[] = "HTTP/1.1 400 Bad Request: Invalid HTTP-Version: %s\r\n Content-Type: text/html; charset=UTF-8\r\n\r\n <!DOCTYPE html><html><head><title>400 Bad Request</title> <body><h1>400 Bad Request</h1></body></html>\r\n";
+
+  switch (status_code)
+  {
+    case NOT_FOUND:
+      printf("Printing error page");
+      sprintf((char *)&actual_response, not_found, params->URI);
+      write(client, actual_response, sizeof(actual_response) -1);
+      break;
+    case BAD_METHOD:
+      break;
+    case BAD_URI:
+      break;
+    case BAD_HTTP_VERSION:
+      break;
+  }
+
+  //printf("This is what the body is returning: %s\n", body);
   //write(client, body, sizeof(body) -1);
-  write(client, bad_response, sizeof(bad_response) -1);
   printf("Leaving: send_response()\n");
 
 
@@ -191,11 +214,7 @@ void interpret_request(struct HTTP_RequestParams *params, int *decision) {
     printf("We have a path!!");
     *decision = 1;
   }
-
-
-
   printf("Leaving: interpret_request()\n");
-
 }
 /*-------------------------------------------------------------------------------------------------------------------------------------------
  * extract_request_path - this function will be mainly responsible for parsing and extracting the path from the HTTP request from the client
@@ -240,7 +259,6 @@ void removeSubstring(char *s,const char *toremove)
  * setup_server - first function called on entry, prints information and reads in config file 
  *----------------------------------------------------------------------------------------------
  */
-
 void setup_server(struct TextfileData *config_data)
 {
   printf("Beginning of: setup_server()\n");
