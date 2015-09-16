@@ -19,10 +19,13 @@
 #define NUM_THREADS 4
 
 
+#define FALSE 0
+#define TRUE 1
 #define NOT_FOUND 404
 #define BAD_METHOD 4040
 #define BAD_URI 4041
 #define BAD_HTTP_VERSION 4042
+#define NUM_OF_FILE_TYPES 4
 
 
 /*--------------/
@@ -30,6 +33,7 @@
  *--------------*/
 
 /* Struct Definitions */
+
 struct HTTP_RequestParams {
   char *method;
   char *URI;
@@ -40,11 +44,16 @@ struct TextfileData {
   int port_number;
   char document_root[MAX_PATH_LENGTH];
   char default_web_page[20];
+  char extensions[5][512];
+  char encodings [5][512];
+  const char *png[2];
+  const char *gif[2];
+
 };
 
 /* Function Declarations */
 void send_response(int client, int status_code, struct HTTP_RequestParams *params);
-int handle_file_serving(char *path, char *body, struct TextfileData *config_data);
+int handle_file_serving(char *path, char *body, struct TextfileData *config_data, int *result_status);
 void client_handler(int client, struct TextfileData *config_data);
 void interpret_request(struct HTTP_RequestParams *params, int *decision);
 void extract_request_path(char *response, struct HTTP_RequestParams *params);
@@ -74,6 +83,10 @@ int main(int argc, char ** argv)
   printf("Port Number: %d\n", system_config_data.port_number);
   printf("Document Root: %s\n", system_config_data.document_root);
   printf("Default Web Page: %s\n", system_config_data.default_web_page);
+  printf("HTTP Encoding Details: %s, %s\n", system_config_data.extensions[0], system_config_data.encodings[0]);
+  printf("Text Encoding Details: %s, %s\n", system_config_data.extensions[1], system_config_data.encodings[1]);
+  printf("PNG Encoding Details: %s, %s\n", system_config_data.extensions[2], system_config_data.encodings[2]);
+  printf("GIF Encoding Details: %s, %s\n", system_config_data.extensions[3], system_config_data.encodings[3]);
   main_socket = setup_socket(system_config_data.port_number, MAX_CLIENTS);
 
   while (1)  {
@@ -120,6 +133,7 @@ void client_handler(int client, struct TextfileData *config_data) {
     "<body><h1>Hello World</h1></body></html>\r\n";
   int data_len;
   char data[MAX_DATA];
+  int status_code;
   char file_response[MAX_DATA];
   char file_path[MAX_PATH_LENGTH];
 
@@ -133,13 +147,11 @@ void client_handler(int client, struct TextfileData *config_data) {
     printf("URI: %s\n", request_params.URI);
     printf("VERSION: %s\n", request_params.httpversion);
     printf("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n");
-    if ((handle_file_serving( (request_params.URI), (char *)&file_response, config_data) == 1)) {
-      printf("File wasn't found, need to print 404...\n");
-      send_response(client, 404, &request_params);
-      //write(client, response, sizeof(response) -1);
-    }
-    else
-      send_response(client, 200, &request_params);
+    handle_file_serving( (request_params.URI), (char *)&file_response, config_data, &status_code);
+    printf("Returned status code is %d", status_code);
+    send_response(client, status_code, &request_params);
+    //printf("Checking to see if the file path is being transferred. This is what gets stored in file_response: %s\n", file_response);
+    //send_response(client, 200, &request_params);
   }
 }
 /*--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -148,19 +160,24 @@ void client_handler(int client, struct TextfileData *config_data) {
  */
 void send_response(int client, int status_code, struct HTTP_RequestParams *params) {
   printf("Beginning of: send_response()\n");
-  char not_found[] = "HTTP/1.1 404 Not Found: %s\r\n"
+  char final_response[1024];
+
+  char not_found[] = "HTTP/1.1 404 Not Found:%s\r\n"
     "Content-Type: text/html; charset=UTF-8\r\n\r\n"
-    "<!DOCTYPE html><html><head><title>404 Error</title>"
-    "<body><h1>404 Not Found</h1></body></html>\r\n";
-  char response[] = "HTTP/1.1 200 OK\r\n"
+    "<!DOCTYPE html><html><head><title>404 Not Found</title>"
+    "<body><h1>404 Not Found:</h1></body></html>\r\n";
+
+
+  char not_implemented[] = "HTTP/1.1 501 Not Implemented: \r\n"
     "Content-Type: text/html; charset=UTF-8\r\n\r\n"
-    "<!DOCTYPE html><html><head><title>Bye-bye baby bye-bye</title>"
-    "<style>body { background-color: #111 }"
-    "h1 { font-size:4cm; text-align: center; color: black;"
-    " text-shadow: 0 0 2mm blue}</style></head>"
-    "<body><h1>Hello World</h1></body></html>\r\n";
-  char actual_response[] = "alex\r\n";
-  
+    "<!DOCTYPE html><html><head><title>501 Not Implemented</title>"
+    "<body><h1>501 Not Implemented</h1></body></html>\r\n";
+
+  char response[] = "HTTP/1.1 200 OK\r\n" "Content-Type: text/html; charset=UTF-8\r\n\r\n" "<!DOCTYPE html><html><head><title>Bye-bye baby bye-bye</title>" "<style>body { background-color: #111 }" "h1 { font-size:4cm; text-align: center; color: black;" " text-shadow: 0 0 2mm blue}</style></head>" "<body><h1>Hello World</h1></body></html>\r\n";
+    
+  char line_response[] = "HTTP/1.1 200 OK\r\n Content-Type: text/html; charset=UTF-8\r\n\r\n <!DOCTYPE html><html><head><title>Line Response</title> <style>body { background-color: #121 } h1 { font-size:4cm; text-align: center; color: black;  text-shadow: 0 0 2mm green}</style></head> <body><h1>Line Response</h1></body></html>\r\n";
+
+
   //sprintf((char *)&actual_response, not_found, params->URI);
 
   //char not_found[] = "HTTP/1.1 404 Not Found\r\n Content-Type: text/html; charset=UTF-8\r\n\r\n <!DOCTYPE html><html><head><title>404 Error</title> <body><h1>404 Not Found</h1></body></html>\r\n";
@@ -171,15 +188,20 @@ void send_response(int client, int status_code, struct HTTP_RequestParams *param
 
   switch (status_code)
   {
-    case NOT_FOUND:
+    case 501:
+      printf("Printing not implemented page\n");
+      write(client, not_implemented, sizeof(not_implemented) -1);
+      break;
+    case 404:
       printf("Printing error page\n");
-      write(client, not_found, sizeof(not_found) -1);
+      //removeSubstring(params->URI, "/");
+      sprintf(final_response, not_found, params->URI);
+      printf("The final response should be %s\n", final_response);
+      write(client, final_response, sizeof(final_response) -1);
       break;
     case 200:
       printf("Printing regular page\n");
-      write(client, response, sizeof(response) -1);
-      break;
-    case BAD_URI:
+      write(client, response, sizeof(response)-1);
       break;
     case BAD_HTTP_VERSION:
       break;
@@ -196,36 +218,54 @@ void send_response(int client, int status_code, struct HTTP_RequestParams *param
  * handle_file_serving - this function will take in a file path, and either construct the correct response body to serve up that file or it will return false if the file does not exist
  *--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  */
-int handle_file_serving(char *path, char *body, struct TextfileData *config_data) {
+int handle_file_serving(char *path, char *body, struct TextfileData *config_data, int *result_status) {
   printf("Beginning of: handle_file_serving()\n");
+  int file_supported, i;
   char user_request_file_path[PATH_MAX + 1];
+  char *user_request_extension;
+  char bad_response[] = "HTTP/1.1 404 Not Found\r\n Content-Type: text/html; charset=UTF-8\r\n\r\n <!DOCTYPE html><html><head><title>404 Error</title> <body><h1>404 Error</h1></body></html>\r\n";
+  struct stat buffer;
 
   strcpy(user_request_file_path, config_data->document_root);
   strcat(user_request_file_path, path);
 
   printf("This is the path that the user officially requested: %s\n", user_request_file_path);
+  printf("This is the extension that the user specified: %s\n", strchr(user_request_file_path, '.'));
 
-  char bad_response[] = "HTTP/1.1 404 Not Found\r\n Content-Type: text/html; charset=UTF-8\r\n\r\n <!DOCTYPE html><html><head><title>404 Error</title> <body><h1>404 Error</h1></body></html>\r\n";
-  struct stat buffer;
-  if ((stat (user_request_file_path, &buffer) == 0)) {
-    printf("YAY FILE EXISTS\n");
-    printf("Time to construct the file and serve it up...");
+  if ( ((strcmp(path, "/index")) == 0) || ((strcmp(path,"/")) ==0)  ) {
+    printf("User has requested the main site, time to serve up index.html");
+    *result_status = 200;
     return 0;
   }
-  else{
-    if ( (strcmp(path, "/index")) == 0) {
-      printf("User has requested the main site, time to serve up index.html");
-      return 0;
-    }
-    else {
-      printf("File not found\n");
-      //strcpy(body, bad_response);
-      return 1;
-    }
-  }
-  printf("Leaving: handle_file_serving()\n");
 
+  user_request_extension = strchr(user_request_file_path, '.');
+  file_supported = FALSE;
+  for (i = 0; i < NUM_OF_FILE_TYPES; i++) {
+    if ( (strcmp(user_request_extension, config_data->extensions[i])) == 0)
+      file_supported = TRUE;
+  }
+  if (!file_supported) {
+    printf("File type is not supported, time to print 501\n");
+    *result_status = 501;
+    return(0);
+  }
+
+  if ( (stat (user_request_file_path, &buffer) == 0)) {
+    printf("YAY FILE EXISTS\n");
+    printf("Time to construct the file and serve it up...");
+    *result_status = 200;
+    strcpy(body, user_request_file_path);
+    return 0;
+  }
+  else {
+    printf("File not found\n");
+    *result_status = 404;
+    //strcpy(body, bad_response);
+    return 1;
+  }
+printf("Leaving: handle_file_serving()\n");
 }
+
 
 
 /*-------------------------------------------------------------------------------------------------------------------------------------------
@@ -251,7 +291,6 @@ void interpret_request(struct HTTP_RequestParams *params, int *decision) {
  * extract_request_path - this function will be mainly responsible for parsing and extracting the path from the HTTP request from the client
  *-------------------------------------------------------------------------------------------------------------------------------------------
  */
-//void extract_request_path(char *response, char *return_path) {
 void extract_request_path(char *response, struct HTTP_RequestParams *params) {
   printf("Beginning of: extract_request_path()\n");
   char *saveptr;
@@ -299,7 +338,6 @@ void setup_server(struct TextfileData *config_data)
   char conf_file_path[PATH_MAX + 1];
   char read_line[200];
   char *saveptr;
-  char *port_number;
   char *current_line;
   current_path = getcwd(buff, PATH_MAX + 1);
 
@@ -312,9 +350,11 @@ void setup_server(struct TextfileData *config_data)
   if (config_file == NULL)
     printf("File was unable to be opened\n");
   else
-    printf("File succesfully opened!!");
+    printf("File succesfully opened!!\n");
 
   int counter = 1;
+  /* Hard coded the extraction of attributes from the conf file by referencing the line numebers that I expect each property to be on
+   * THIS WILL BREAK IF THE CONF FILE ISN'T IN THE SAME FORMAT */
   while (fgets (read_line,200, config_file) != NULL)
   {
     if (counter == 2) {
@@ -329,7 +369,32 @@ void setup_server(struct TextfileData *config_data)
     }
     if (counter == 6) {
       current_line = strtok_r(read_line, " ", &saveptr);
+      removeSubstring(saveptr, "\n");
       strcpy(config_data->default_web_page, saveptr);
+    }
+    if (counter == 8) {
+      current_line = strtok_r(read_line, " ", &saveptr);
+      strcpy(config_data->extensions[0], current_line);
+      removeSubstring(saveptr, "\n");
+      strcpy(config_data->encodings[0], saveptr);
+    }
+    if (counter == 9) {
+      current_line = strtok_r(read_line, " ", &saveptr);
+      strcpy(config_data->extensions[1], current_line);
+      removeSubstring(saveptr, "\n");
+      strcpy(config_data->encodings[1], saveptr);
+    }
+    if (counter == 10) {
+      current_line = strtok_r(read_line, " ", &saveptr);
+      strcpy(config_data->extensions[2], current_line);
+      removeSubstring(saveptr, "\n");
+      strcpy(config_data->encodings[2], saveptr);
+    }
+    if (counter == 11) {
+      current_line = strtok_r(read_line, " ", &saveptr);
+      strcpy(config_data->extensions[3], current_line);
+      removeSubstring(saveptr, "\n");
+      strcpy(config_data->encodings[3], saveptr);
     }
     counter++;
   }
