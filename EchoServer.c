@@ -1,3 +1,4 @@
+#include<limits.h>
 #include<string.h>
 #include<stdio.h>
 #include<stdlib.h>
@@ -37,8 +38,8 @@ struct HTTP_RequestParams {
 
 struct TextfileData {
   int port_number;
-  char *document_root;
-  char *default_web_page;
+  char document_root[MAX_PATH_LENGTH];
+  char default_web_page[20];
 };
 
 /* Function Declarations */
@@ -69,6 +70,10 @@ int main(int argc, char ** argv)
 
 
   setup_server(&system_config_data); 
+  printf("CURRENT SERVER SETUP: \n");
+  printf("Port Number: %d\n", system_config_data.port_number);
+  printf("Document Root: %s\n", system_config_data.document_root);
+  printf("Default Web Page: %s\n", system_config_data.default_web_page);
   main_socket = setup_socket(system_config_data.port_number, MAX_CLIENTS);
 
   while (1)  {
@@ -78,6 +83,7 @@ int main(int argc, char ** argv)
       exit(1);
     }
 
+    printf("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n");
     printf("New Client connected from port number %d and IP %s\n", ntohs(client.sin_port), inet_ntoa(client.sin_addr));
 
     pid = fork();
@@ -87,14 +93,12 @@ int main(int argc, char ** argv)
     }
 
     if (pid == 0) {
-      printf("HAHA I am the child aka client process");
       close(main_socket);
       client_handler(cli);
       exit(0);
     }
 
     if (pid > 0) {
-      printf("I am the parent id");
       close(cli);
     }
   }
@@ -102,8 +106,7 @@ int main(int argc, char ** argv)
 
 void client_handler(int client) {
 
-  printf("Hello from process %d\n", (int) getpid());
-  printf("Beginning of (process): client_handler()\n");
+  printf("Hello from client_handler with process number: %d\n", (int) getpid());
 
   struct HTTP_RequestParams request_params;
   int what_to_do;
@@ -130,6 +133,7 @@ void client_handler(int client) {
     printf("METHOD: %s\n", request_params.method);
     printf("URI: %s\n", request_params.URI);
     printf("VERSION: %s\n", request_params.httpversion);
+    printf("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n");
     write(cli, response, sizeof(response) -1);
     /*if ((handle_file_serving((char *)&request_params.URI, (char *)&file_response)) == 1) {
       printf("File wasn't found, need to print 404...\n");
@@ -262,9 +266,53 @@ void removeSubstring(char *s,const char *toremove)
 void setup_server(struct TextfileData *config_data)
 {
   printf("Beginning of: setup_server()\n");
-  config_data->port_number = 10000;
-  config_data->document_root = "doc root";
-  config_data->default_web_page = "web page";
+
+  char *current_path;
+  char buff[PATH_MAX + 1];
+  char conf_file_path[PATH_MAX + 1];
+  char read_line[200];
+  char *saveptr;
+  char *port_number;
+  char *current_line;
+  current_path = getcwd(buff, PATH_MAX + 1);
+
+  strcpy(conf_file_path, current_path);
+  strcat(conf_file_path, "/ws.conf");
+
+  printf("The file path of the conf file is %s\n", conf_file_path);
+
+  FILE *config_file;
+  config_file = fopen(conf_file_path, "r");
+  if (config_file == NULL)
+    printf("File was unable to be opened\n");
+  else
+    printf("File succesfully opened!!");
+
+  int counter = 1;
+  while (fgets (read_line,200, config_file) != NULL)
+  {
+    if (counter == 2) {
+      current_line = strtok_r(read_line, " ", &saveptr);
+      printf("This should be the second token: %s\n", saveptr);
+      config_data->port_number = atoi(saveptr);
+    }
+    if (counter == 4) {
+      current_line = strtok_r(read_line, " ", &saveptr);
+      removeSubstring(saveptr, "\"");
+      removeSubstring(saveptr, "\n");
+      printf("This should be the second token: %s\n", saveptr);
+      strcpy(config_data->document_root, saveptr);
+    }
+
+    if (counter == 6) {
+      current_line = strtok_r(read_line, " ", &saveptr);
+      printf("This should be the second token: %s\n", saveptr);
+      strcpy(config_data->default_web_page, saveptr);
+    }
+
+    counter++;
+  }
+
 
   printf("Leaving: setup_server()\n\n");
 }
