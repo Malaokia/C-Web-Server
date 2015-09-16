@@ -44,8 +44,8 @@ struct TextfileData {
 
 /* Function Declarations */
 void send_response(int client, int status_code, struct HTTP_RequestParams *params);
-int handle_file_serving(char *path, char *body);
-void client_handler(int client);
+int handle_file_serving(char *path, char *body, struct TextfileData *config_data);
+void client_handler(int client, struct TextfileData *config_data);
 void interpret_request(struct HTTP_RequestParams *params, int *decision);
 void extract_request_path(char *response, struct HTTP_RequestParams *params);
 void removeSubstring(char *s,const char *toremove);
@@ -94,7 +94,7 @@ int main(int argc, char ** argv)
 
     if (pid == 0) {
       close(main_socket);
-      client_handler(cli);
+      client_handler(cli, &system_config_data);
       exit(0);
     }
 
@@ -104,7 +104,7 @@ int main(int argc, char ** argv)
   }
 }
 
-void client_handler(int client) {
+void client_handler(int client, struct TextfileData *config_data) {
 
   printf("Hello from client_handler with process number: %d\n", (int) getpid());
 
@@ -135,11 +135,10 @@ void client_handler(int client) {
     printf("VERSION: %s\n", request_params.httpversion);
     printf("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n");
     write(cli, response, sizeof(response) -1);
-    /*if ((handle_file_serving((char *)&request_params.URI, (char *)&file_response)) == 1) {
+    if ((handle_file_serving( (request_params.URI), (char *)&file_response, config_data) == 1)) {
       printf("File wasn't found, need to print 404...\n");
-      send_response(cli, 404, &request_params);
+      //send_response(cli, 404, &request_params);
     }
-    */
   }
 }
 /*--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -181,9 +180,17 @@ void send_response(int client, int status_code, struct HTTP_RequestParams *param
  * handle_file_serving - this function will take in a file path, and either construct the correct response body to serve up that file or it will return false if the file does not exist
  *--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  */
-int handle_file_serving(char *path, char *body) {
+int handle_file_serving(char *path, char *body, struct TextfileData *config_data) {
   printf("Beginning of: handle_file_serving()\n");
+  printf("This is the value of path that is being passed into this function %s\n", path);
+  char user_request_file_path[PATH_MAX + 1];
 
+  strcpy(user_request_file_path, config_data->document_root);
+  strcat(user_request_file_path, path);
+
+  printf("This is the path that the user officially requested: %s\n", user_request_file_path);
+
+  /*
   char bad_response[] = "HTTP/1.1 404 Not Found\r\n Content-Type: text/html; charset=UTF-8\r\n\r\n <!DOCTYPE html><html><head><title>404 Error</title> <body><h1>404 Error</h1></body></html>\r\n";
   struct stat buffer;
   if ((stat ("www/images/weome.png", &buffer) == 0)) {
@@ -196,6 +203,8 @@ int handle_file_serving(char *path, char *body) {
     strcpy(body, bad_response);
     return 1;
   }
+  */
+  return 1;
   printf("Leaving: handle_file_serving()\n");
 
 }
@@ -279,7 +288,6 @@ void setup_server(struct TextfileData *config_data)
   strcpy(conf_file_path, current_path);
   strcat(conf_file_path, "/ws.conf");
 
-  printf("The file path of the conf file is %s\n", conf_file_path);
 
   FILE *config_file;
   config_file = fopen(conf_file_path, "r");
@@ -293,23 +301,18 @@ void setup_server(struct TextfileData *config_data)
   {
     if (counter == 2) {
       current_line = strtok_r(read_line, " ", &saveptr);
-      printf("This should be the second token: %s\n", saveptr);
       config_data->port_number = atoi(saveptr);
     }
     if (counter == 4) {
       current_line = strtok_r(read_line, " ", &saveptr);
       removeSubstring(saveptr, "\"");
       removeSubstring(saveptr, "\n");
-      printf("This should be the second token: %s\n", saveptr);
       strcpy(config_data->document_root, saveptr);
     }
-
     if (counter == 6) {
       current_line = strtok_r(read_line, " ", &saveptr);
-      printf("This should be the second token: %s\n", saveptr);
       strcpy(config_data->default_web_page, saveptr);
     }
-
     counter++;
   }
 
