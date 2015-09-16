@@ -52,10 +52,10 @@ struct TextfileData {
 };
 
 /* Function Declarations */
-void send_response(int client, int status_code, struct HTTP_RequestParams *params);
+void send_response(int client, int status_code, struct HTTP_RequestParams *params, char *full_path);
 int handle_file_serving(char *path, char *body, struct TextfileData *config_data, int *result_status);
 void client_handler(int client, struct TextfileData *config_data);
-void interpret_request(struct HTTP_RequestParams *params, int *decision);
+int interpret_request(struct HTTP_RequestParams *params, int *decision);
 void extract_request_path(char *response, struct HTTP_RequestParams *params);
 void removeSubstring(char *s,const char *toremove);
 int setup_socket (int port_number, int max_clients);
@@ -83,10 +83,10 @@ int main(int argc, char ** argv)
   printf("Port Number: %d\n", system_config_data.port_number);
   printf("Document Root: %s\n", system_config_data.document_root);
   printf("Default Web Page: %s\n", system_config_data.default_web_page);
-  printf("HTTP Encoding Details: %s, %s\n", system_config_data.extensions[0], system_config_data.encodings[0]);
-  printf("Text Encoding Details: %s, %s\n", system_config_data.extensions[1], system_config_data.encodings[1]);
-  printf("PNG Encoding Details: %s, %s\n", system_config_data.extensions[2], system_config_data.encodings[2]);
-  printf("GIF Encoding Details: %s, %s\n", system_config_data.extensions[3], system_config_data.encodings[3]);
+  //printf("HTTP Encoding Details: %s, %s\n", system_config_data.extensions[0], system_config_data.encodings[0]);
+  //printf("Text Encoding Details: %s, %s\n", system_config_data.extensions[1], system_config_data.encodings[1]);
+  //printf("PNG Encoding Details: %s, %s\n", system_config_data.extensions[2], system_config_data.encodings[2]);
+  //printf("GIF Encoding Details: %s, %s\n", system_config_data.extensions[3], system_config_data.encodings[3]);
   main_socket = setup_socket(system_config_data.port_number, MAX_CLIENTS);
 
   while (1)  {
@@ -96,7 +96,6 @@ int main(int argc, char ** argv)
       exit(1);
     }
 
-    printf("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n");
     printf("New Client connected from port number %d and IP %s\n", ntohs(client.sin_port), inet_ntoa(client.sin_addr));
 
     pid = fork();
@@ -112,6 +111,7 @@ int main(int argc, char ** argv)
     }
 
     if (pid > 0) {
+      printf("Disconnecting client\n");
       close(cli);
     }
   }
@@ -132,9 +132,10 @@ void client_handler(int client, struct TextfileData *config_data) {
     " text-shadow: 0 0 2mm blue}</style></head>"
     "<body><h1>Hello World</h1></body></html>\r\n";
   int data_len;
+  int decision;
   char data[MAX_DATA];
   int status_code;
-  char file_response[MAX_DATA];
+  char absolute_file_path[MAX_DATA];
   char file_path[MAX_PATH_LENGTH];
 
   data_len = recv(client, data, MAX_DATA, 0);
@@ -146,11 +147,14 @@ void client_handler(int client, struct TextfileData *config_data) {
     printf("METHOD: %s\n", request_params.method);
     printf("URI: %s\n", request_params.URI);
     printf("VERSION: %s\n", request_params.httpversion);
-    printf("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n");
-    handle_file_serving( (request_params.URI), (char *)&file_response, config_data, &status_code);
-    printf("Returned status code is %d", status_code);
-    send_response(client, status_code, &request_params);
-    //printf("Checking to see if the file path is being transferred. This is what gets stored in file_response: %s\n", file_response);
+    if (interpret_request(&request_params, &status_code))
+      send_response(client, status_code, &request_params, (char *)&absolute_file_path);
+    else {
+      handle_file_serving( (request_params.URI), (char *)&absolute_file_path, config_data, &status_code);
+      printf("Returned status code is %d\n", status_code);
+      send_response(client, status_code, &request_params, (char *)&absolute_file_path);
+    }
+    //printf("Checking to see if the file path is being transferred. This is what gets stored in absolute_file_path: %s\n", absolute_file_path);
     //send_response(client, 200, &request_params);
   }
 }
@@ -158,33 +162,37 @@ void client_handler(int client, struct TextfileData *config_data) {
  * send_response - this function will be the function that actually sends a message to the client. This message will contain the proper headers and the respective body content
  *--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  */
-void send_response(int client, int status_code, struct HTTP_RequestParams *params) {
+void send_response(int client, int status_code, struct HTTP_RequestParams *params, char *full_path) {
   printf("Beginning of: send_response()\n");
+  printf("This is the path that was passed into me!! %s\n", full_path);
   char final_response[1024];
+
+  char invalid_version[] = "HTTP/1.1 400 Bad Request: Invalid Version\r\n"
+    "Content-Type: text/html; charset=UTF-8\r\n\r\n";
+
+  char invalid_uri[] = "HTTP/1.1 400 Bad Request: Invalid URI\r\n"
+    "Content-Type: text/html; charset=UTF-8\r\n\r\n";
+
+  char invalid_method[] = "HTTP/1.1 400 Bad Request: Invalid Method\r\n"
+    "Content-Type: text/html; charset=UTF-8\r\n\r\n";
 
   char not_found[] = "HTTP/1.1 404 Not Found:%s\r\n"
     "Content-Type: text/html; charset=UTF-8\r\n\r\n"
     "<!DOCTYPE html><html><head><title>404 Not Found</title>"
     "<body><h1>404 Not Found:</h1></body></html>\r\n";
 
+  char response[] = "HTTP/1.1 200 OK:\r\n"
+    "Content-Type: text/html; charset=UTF-8\r\n\r\n"
+    "<!DOCTYPE html><html><head><title>404 Not Found</title>"
+    "<body><h1>GOODDDDDDDDD</h1></body></html>\r\n";
 
   char not_implemented[] = "HTTP/1.1 501 Not Implemented: \r\n"
     "Content-Type: text/html; charset=UTF-8\r\n\r\n"
     "<!DOCTYPE html><html><head><title>501 Not Implemented</title>"
     "<body><h1>501 Not Implemented</h1></body></html>\r\n";
 
-  char response[] = "HTTP/1.1 200 OK\r\n" "Content-Type: text/html; charset=UTF-8\r\n\r\n" "<!DOCTYPE html><html><head><title>Bye-bye baby bye-bye</title>" "<style>body { background-color: #111 }" "h1 { font-size:4cm; text-align: center; color: black;" " text-shadow: 0 0 2mm blue}</style></head>" "<body><h1>Hello World</h1></body></html>\r\n";
-    
-  char line_response[] = "HTTP/1.1 200 OK\r\n Content-Type: text/html; charset=UTF-8\r\n\r\n <!DOCTYPE html><html><head><title>Line Response</title> <style>body { background-color: #121 } h1 { font-size:4cm; text-align: center; color: black;  text-shadow: 0 0 2mm green}</style></head> <body><h1>Line Response</h1></body></html>\r\n";
-
-
   //sprintf((char *)&actual_response, not_found, params->URI);
 
-  //char not_found[] = "HTTP/1.1 404 Not Found\r\n Content-Type: text/html; charset=UTF-8\r\n\r\n <!DOCTYPE html><html><head><title>404 Error</title> <body><h1>404 Not Found</h1></body></html>\r\n";
-  //char not_found[] = "HTTP/1.1 404 Not Found: %s\r\n Content-Type: text/html; charset=UTF-8\r\n\r\n <!DOCTYPE html><html><head><title>404 Error</title> <body><h1>404 Not Found</h1></body></html>\r\n";
-  char invalid_uri[] = "HTTP/1.1 400 Bad Request: Invalid URI: %s\r\n Content-Type: text/html; charset=UTF-8\r\n\r\n <!DOCTYPE html><html><head><title>400 Bad Request</title> <body><h1>400 Bad Request</h1></body></html>\r\n";
-  char invalid_method[] = "HTTP/1.1 400 Bad Request: Invalid Method: %s\r\n Content-Type: text/html; charset=UTF-8\r\n\r\n <!DOCTYPE html><html><head><title>400 Bad Request</title> <body><h1>400 Bad Request</h1></body></html>\r\n";
-  char invalid_version[] = "HTTP/1.1 400 Bad Request: Invalid HTTP-Version: %s\r\n Content-Type: text/html; charset=UTF-8\r\n\r\n <!DOCTYPE html><html><head><title>400 Bad Request</title> <body><h1>400 Bad Request</h1></body></html>\r\n";
 
   switch (status_code)
   {
@@ -203,13 +211,21 @@ void send_response(int client, int status_code, struct HTTP_RequestParams *param
       printf("Printing regular page\n");
       write(client, response, sizeof(response)-1);
       break;
+    case 4001:
+      printf("This is a bad http method\n");
+      write(client,invalid_method, sizeof(invalid_method) -1);
+      break;
+    case 4002:
+      printf("This is a bad http version\n");
+      write(client,invalid_version, sizeof(invalid_version) -1);
+      break;
     case BAD_HTTP_VERSION:
       break;
   }
 
   //printf("This is what the body is returning: %s\n", body);
   //write(client, body, sizeof(body) -1);
-  printf("Leaving: send_response()\n");
+  printf("Leaving: send_response()\n\n\n");
 
 
 }
@@ -220,26 +236,31 @@ void send_response(int client, int status_code, struct HTTP_RequestParams *param
  */
 int handle_file_serving(char *path, char *body, struct TextfileData *config_data, int *result_status) {
   printf("Beginning of: handle_file_serving()\n");
+
   int file_supported, i;
+  file_supported = FALSE;
   char user_request_file_path[PATH_MAX + 1];
   char *user_request_extension;
-  char bad_response[] = "HTTP/1.1 404 Not Found\r\n Content-Type: text/html; charset=UTF-8\r\n\r\n <!DOCTYPE html><html><head><title>404 Error</title> <body><h1>404 Error</h1></body></html>\r\n";
   struct stat buffer;
 
+  /* append the user requested path to the document root to obtain the absolute path for files that are being requested */
   strcpy(user_request_file_path, config_data->document_root);
   strcat(user_request_file_path, path);
+  user_request_extension = strchr(user_request_file_path, '.');
 
   printf("This is the path that the user officially requested: %s\n", user_request_file_path);
-  printf("This is the extension that the user specified: %s\n", strchr(user_request_file_path, '.'));
+  //printf("This is the extension that the user specified: %s\n", strchr(user_request_file_path, '.'));
 
-  if ( ((strcmp(path, "/index")) == 0) || ((strcmp(path,"/")) ==0)  ) {
+  /* check if user is requesting the root page */
+  if ( ((strcmp(path, "/index")) == 0) || ((strcmp(path,"/")) ==0) || ((strcmp(path,"/index.html")) ==0)  ) {
     printf("User has requested the main site, time to serve up index.html");
     *result_status = 200;
+    strcat(user_request_file_path, "index.html");
+    strcpy(body, user_request_file_path);
     return 0;
   }
 
-  user_request_extension = strchr(user_request_file_path, '.');
-  file_supported = FALSE;
+  /* check to see if file requested is of a supported file type */
   for (i = 0; i < NUM_OF_FILE_TYPES; i++) {
     if ( (strcmp(user_request_extension, config_data->extensions[i])) == 0)
       file_supported = TRUE;
@@ -247,9 +268,12 @@ int handle_file_serving(char *path, char *body, struct TextfileData *config_data
   if (!file_supported) {
     printf("File type is not supported, time to print 501\n");
     *result_status = 501;
+    strcpy(body, user_request_file_path);
     return(0);
   }
 
+  /* at this point the path requested is neither the home page, nor is it an invalid file type. This means that it must either 
+   * not exist in the directory (return 404) or it must exist and we must serve it up */
   if ( (stat (user_request_file_path, &buffer) == 0)) {
     printf("YAY FILE EXISTS\n");
     printf("Time to construct the file and serve it up...");
@@ -260,8 +284,8 @@ int handle_file_serving(char *path, char *body, struct TextfileData *config_data
   else {
     printf("File not found\n");
     *result_status = 404;
-    //strcpy(body, bad_response);
-    return 1;
+    strcpy(body, user_request_file_path);
+    return 0;
   }
 printf("Leaving: handle_file_serving()\n");
 }
@@ -272,18 +296,28 @@ printf("Leaving: handle_file_serving()\n");
  * interpret_request - this function will be take the users path and decide what to do based on the result
  *-------------------------------------------------------------------------------------------------------------------------------------------
  */
-void interpret_request(struct HTTP_RequestParams *params, int *decision) {
+int interpret_request(struct HTTP_RequestParams *params, int *decision) {
 
   printf("Beginning of: interpret_request()\n");
 
-  if ( (strcmp(params->URI, "/")) == 0)
+  if ( (strcmp(params->method, "GET")) == 0)
   {
-    printf("Empty Path!!");
-    *decision = 0;
+    printf("Valid Method!!\n");
   }
   else {
-    printf("We have a path!!");
-    *decision = 1;
+    printf("Uh oh method not GET\n");
+    *decision = 4001;
+    return 1;
+  }
+
+  printf("This is the http vetsion that fame in %s\n", params->httpversion);
+  if (((strncmp(params->httpversion, "HTTP/1.1",8 )) == 0)  || ((strcmp(params->httpversion, "HTTP/1.0")) == 0)) {
+    printf("Valid Version\n");
+  }
+  else {
+    printf("Uh oh method version not HTTP/1.1 or HTTP/1.0\n");
+    *decision = 4002;
+    return 1;
   }
   printf("Leaving: interpret_request()\n");
 }
@@ -311,6 +345,7 @@ void extract_request_path(char *response, struct HTTP_RequestParams *params) {
   //printf( "Second token after seperation by space character: %s\n", the_path );
   params->URI = the_path;
   //printf( "Remaining tokens after second seperation by space character: \n%s\n", saveptr );
+
   params->httpversion = saveptr;
   //printf("Leaving: extract_request_path()\n");
 }
