@@ -118,13 +118,12 @@ void client_handler(int client, struct TextfileData *config_data) {
     "h1 { font-size:4cm; text-align: center; color: black;"
     " text-shadow: 0 0 2mm blue}</style></head>"
     "<body><h1>Hello World</h1></body></html>\r\n";
-  int cli = client;
   int data_len;
   char data[MAX_DATA];
   char file_response[MAX_DATA];
   char file_path[MAX_PATH_LENGTH];
 
-  data_len = recv(cli, data, MAX_DATA, 0);
+  data_len = recv(client, data, MAX_DATA, 0);
   if (data_len) {
     //printf("Request received of size: %zd\n", data_len);
     //printf("Request: \n%s\n", data);
@@ -134,11 +133,13 @@ void client_handler(int client, struct TextfileData *config_data) {
     printf("URI: %s\n", request_params.URI);
     printf("VERSION: %s\n", request_params.httpversion);
     printf("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n");
-    write(cli, response, sizeof(response) -1);
     if ((handle_file_serving( (request_params.URI), (char *)&file_response, config_data) == 1)) {
       printf("File wasn't found, need to print 404...\n");
-      //send_response(cli, 404, &request_params);
+      send_response(client, 404, &request_params);
+      //write(client, response, sizeof(response) -1);
     }
+    else
+      send_response(client, 200, &request_params);
   }
 }
 /*--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -147,9 +148,23 @@ void client_handler(int client, struct TextfileData *config_data) {
  */
 void send_response(int client, int status_code, struct HTTP_RequestParams *params) {
   printf("Beginning of: send_response()\n");
-  char actual_response [MAX_RESPONSE];
+  char not_found[] = "HTTP/1.1 404 Not Found: %s\r\n"
+    "Content-Type: text/html; charset=UTF-8\r\n\r\n"
+    "<!DOCTYPE html><html><head><title>404 Error</title>"
+    "<body><h1>404 Not Found</h1></body></html>\r\n";
+  char response[] = "HTTP/1.1 200 OK\r\n"
+    "Content-Type: text/html; charset=UTF-8\r\n\r\n"
+    "<!DOCTYPE html><html><head><title>Bye-bye baby bye-bye</title>"
+    "<style>body { background-color: #111 }"
+    "h1 { font-size:4cm; text-align: center; color: black;"
+    " text-shadow: 0 0 2mm blue}</style></head>"
+    "<body><h1>Hello World</h1></body></html>\r\n";
+  char actual_response[] = "alex\r\n";
+  
+  //sprintf((char *)&actual_response, not_found, params->URI);
 
-  char not_found[] = "HTTP/1.1 404 Not Found: %s\r\n Content-Type: text/html; charset=UTF-8\r\n\r\n <!DOCTYPE html><html><head><title>404 Error</title> <body><h1>404 Not Found</h1></body></html>\r\n";
+  //char not_found[] = "HTTP/1.1 404 Not Found\r\n Content-Type: text/html; charset=UTF-8\r\n\r\n <!DOCTYPE html><html><head><title>404 Error</title> <body><h1>404 Not Found</h1></body></html>\r\n";
+  //char not_found[] = "HTTP/1.1 404 Not Found: %s\r\n Content-Type: text/html; charset=UTF-8\r\n\r\n <!DOCTYPE html><html><head><title>404 Error</title> <body><h1>404 Not Found</h1></body></html>\r\n";
   char invalid_uri[] = "HTTP/1.1 400 Bad Request: Invalid URI: %s\r\n Content-Type: text/html; charset=UTF-8\r\n\r\n <!DOCTYPE html><html><head><title>400 Bad Request</title> <body><h1>400 Bad Request</h1></body></html>\r\n";
   char invalid_method[] = "HTTP/1.1 400 Bad Request: Invalid Method: %s\r\n Content-Type: text/html; charset=UTF-8\r\n\r\n <!DOCTYPE html><html><head><title>400 Bad Request</title> <body><h1>400 Bad Request</h1></body></html>\r\n";
   char invalid_version[] = "HTTP/1.1 400 Bad Request: Invalid HTTP-Version: %s\r\n Content-Type: text/html; charset=UTF-8\r\n\r\n <!DOCTYPE html><html><head><title>400 Bad Request</title> <body><h1>400 Bad Request</h1></body></html>\r\n";
@@ -157,11 +172,12 @@ void send_response(int client, int status_code, struct HTTP_RequestParams *param
   switch (status_code)
   {
     case NOT_FOUND:
-      printf("Printing error page");
-      sprintf((char *)&actual_response, not_found, params->URI);
-      write(client, actual_response, sizeof(actual_response) -1);
+      printf("Printing error page\n");
+      write(client, not_found, sizeof(not_found) -1);
       break;
-    case BAD_METHOD:
+    case 200:
+      printf("Printing regular page\n");
+      write(client, response, sizeof(response) -1);
       break;
     case BAD_URI:
       break;
@@ -182,7 +198,6 @@ void send_response(int client, int status_code, struct HTTP_RequestParams *param
  */
 int handle_file_serving(char *path, char *body, struct TextfileData *config_data) {
   printf("Beginning of: handle_file_serving()\n");
-  printf("This is the value of path that is being passed into this function %s\n", path);
   char user_request_file_path[PATH_MAX + 1];
 
   strcpy(user_request_file_path, config_data->document_root);
@@ -190,21 +205,24 @@ int handle_file_serving(char *path, char *body, struct TextfileData *config_data
 
   printf("This is the path that the user officially requested: %s\n", user_request_file_path);
 
-  /*
   char bad_response[] = "HTTP/1.1 404 Not Found\r\n Content-Type: text/html; charset=UTF-8\r\n\r\n <!DOCTYPE html><html><head><title>404 Error</title> <body><h1>404 Error</h1></body></html>\r\n";
   struct stat buffer;
-  if ((stat ("www/images/weome.png", &buffer) == 0)) {
+  if ((stat (user_request_file_path, &buffer) == 0)) {
     printf("YAY FILE EXISTS\n");
     printf("Time to construct the file and serve it up...");
     return 0;
   }
   else{
-    printf("File not found\n");
-    strcpy(body, bad_response);
-    return 1;
+    if ( (strcmp(path, "/index")) == 0) {
+      printf("User has requested the main site, time to serve up index.html");
+      return 0;
+    }
+    else {
+      printf("File not found\n");
+      //strcpy(body, bad_response);
+      return 1;
+    }
   }
-  */
-  return 1;
   printf("Leaving: handle_file_serving()\n");
 
 }
