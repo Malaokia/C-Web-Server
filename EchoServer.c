@@ -1,103 +1,34 @@
-#include<limits.h>
-#include<string.h>
-#include<stdio.h>
-#include<stdlib.h>
-#include<sys/types.h>
-#include<sys/socket.h>
-#include<netinet/in.h>
-#include<errno.h>
-#include<unistd.h>
-#include<arpa/inet.h>
-#include<pthread.h>
-#include<sys/stat.h>
-#define ERROR -1
-#define MAX_CLIENTS 32
-#define MAX_DATA 1024
-#define MAX_RESPONSE 1024*1024
-#define MAX_PATH_LENGTH 512
-
-#define NUM_THREADS 4
-
-
-#define FALSE 0
-#define TRUE 1
-#define NOT_FOUND 404
-#define BAD_METHOD 4040
-#define BAD_URI 4041
-#define BAD_HTTP_VERSION 4042
-#define NUM_OF_FILE_TYPES 4
-
-
-/*--------------/
- * HEADER STUFF
- *--------------*/
-
-/* Struct Definitions */
-
-struct HTTP_RequestParams {
-  char *method;
-  char *URI;
-  char *httpversion;
-};
-
-struct TextfileData {
-  int port_number;
-  char document_root[MAX_PATH_LENGTH];
-  char default_web_page[20];
-  char extensions[5][512];
-  char encodings [5][512];
-  const char *png[2];
-  const char *gif[2];
-
-};
-
-/* Function Declarations */
-void send_response(int client, int status_code, struct HTTP_RequestParams *params, char *full_path);
-int handle_file_serving(char *path, char *body, struct TextfileData *config_data, int *result_status);
-void client_handler(int client, struct TextfileData *config_data);
-int interpret_request(struct HTTP_RequestParams *params, int *decision);
-void extract_request_path(char *response, struct HTTP_RequestParams *params);
-void removeSubstring(char *s,const char *toremove);
-int setup_socket (int port_number, int max_clients);
-void setup_server(struct TextfileData *config_data);
-void construct_file_response(char *full_path, int client);
-
-
+#include "EchoServer.h"
 
 int main(int argc, char ** argv)
 {
-  printf("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n");
-  printf("| Welcome to this wonderful C server! |\n");
-  printf("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n");
+  printf("| Welcome to this wonderful C server! |\n\n");
 
-
-  int main_socket;
-  int pid;
+  int main_socket, cli, pid;
   struct TextfileData system_config_data;
   struct sockaddr_in client;
-  int cli;
   unsigned int sockaddr_len = sizeof(struct sockaddr_in);
 
 
+  /* Read in conf file and populate struct */
   setup_server(&system_config_data); 
+
   printf("CURRENT SERVER SETUP: \n");
   printf("Port Number: %d\n", system_config_data.port_number);
   printf("Document Root: %s\n", system_config_data.document_root);
   printf("Default Web Page: %s\n", system_config_data.default_web_page);
-  //printf("HTTP Encoding Details: %s, %s\n", system_config_data.extensions[0], system_config_data.encodings[0]);
-  //printf("Text Encoding Details: %s, %s\n", system_config_data.extensions[1], system_config_data.encodings[1]);
-  //printf("PNG Encoding Details: %s, %s\n", system_config_data.extensions[2], system_config_data.encodings[2]);
-  //printf("GIF Encoding Details: %s, %s\n", system_config_data.extensions[3], system_config_data.encodings[3]);
+
+  /* Create main socket, bind, have it listen */
   main_socket = setup_socket(system_config_data.port_number, MAX_CLIENTS);
 
   while (1)  {
 
+    /* Accept new client from listen() queue whose descriptor is stored in cli */
+    /* This will block until an active connection is present on the queue  */
     if ( (cli = accept(main_socket, (struct sockaddr *)&client, &sockaddr_len)) < 0) {
       perror("ERROR on accept");
       exit(1);
     }
-
-    //printf("New Client connected from port number %d and IP %s\n", ntohs(client.sin_port), inet_ntoa(client.sin_addr));
 
     pid = fork();
     if (pid < 0){
@@ -105,47 +36,44 @@ int main(int argc, char ** argv)
       exit(1);
     }
 
+    /* The child process will handle individual clients, therefore we can 
+     * close the master socket for the childs (clients) address space */
     if (pid == 0) {
       close(main_socket);
       client_handler(cli, &system_config_data);
       exit(0);
     }
 
+    /* The parent will simply sit in this while look acceptting new clients,
+     * it has no need to maintain active sockets with all clients */
     if (pid > 0) {
-      //printf("Disconnecting client\n");
       close(cli);
     }
   }
 }
 
+/*----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ * client_handler - this is the function that gets first called by the child (client) process. It receives the initial request and proceeds onward with error handling, parsing, and file serving
+ *----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------*/
 void client_handler(int client, struct TextfileData *config_data) {
 
   printf("Hello from client_handler with process number: %d\n", (int) getpid());
 
   struct HTTP_RequestParams request_params;
-  int what_to_do;
+  int data_len, status_code;
+  char data[MAX_DATA], absolute_file_path[MAX_PATH_LENGTH];
 
-  char response[] = "HTTP/1.1 200 OK\r\n"
-    "Content-Type: text/html; charset=UTF-8\r\n\r\n"
-    "<!DOCTYPE html><html><head><title>Bye-bye baby bye-bye</title>"
-    "<style>body { background-color: #111 }"
-    "h1 { font-size:4cm; text-align: center; color: black;"
-    " text-shadow: 0 0 2mm blue}</style></head>"
-    "<body><h1>Hello World</h1></body></html>\r\n";
-  int data_len;
-  int decision;
-  char data[MAX_DATA];
-  int status_code;
-  char absolute_file_path[MAX_DATA];
-  char file_path[MAX_PATH_LENGTH];
+  /* Store the body of the request from the client into data */
+  if ( (data_len = recv(client, data, MAX_DATA, 0)) < 0){
+    perror("Recv: ");
+    exit(-1);
+  }
 
-  data_len = recv(client, data, MAX_DATA, 0);
   if (data_len) {
-    //printf("Request received of size: %zd\n", data_len);
-    //printf("Request: \n%s\n", data);
-    extract_request_path((char *)&data, &request_params);
+    extract_request_parameters((char *)&data, &request_params);
     printf("Results of parsing the request body: METHOD: %s  URI: %s  VERSION: %s\n", request_params.method, request_params.URI, request_params.httpversion);
-    if (interpret_request(&request_params, &status_code))
+    /* Validate request_headers will check for bad URIs, methods, or versions and call send_response to directly to return 500 */
+    if (validate_request_headers(&request_params, &status_code))
       send_response(client, status_code, &request_params, (char *)&absolute_file_path);
     else {
       handle_file_serving( (request_params.URI), (char *)&absolute_file_path, config_data, &status_code);
@@ -158,10 +86,8 @@ void client_handler(int client, struct TextfileData *config_data) {
 }
 /*--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  * send_response - this function will be the function that actually sends a message to the client. This message will contain the proper headers and the respective body content
- *--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
- */
+ *-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- */
 void send_response(int client, int status_code, struct HTTP_RequestParams *params, char *full_path) {
- // printf("Beginning of: send_response()\n");
 
   char invalid_version[] = "HTTP/1.1 400 Bad Request: Invalid Version\r\n"
     "Content-Type: text/html; charset=UTF-8\r\n\r\n";
@@ -176,11 +102,6 @@ void send_response(int client, int status_code, struct HTTP_RequestParams *param
     "Content-Type: text/html; charset=UTF-8\r\n\r\n"
     "<!DOCTYPE html><html><head><title>404 Not Found</title>"
     "<body><h1>404 Not Found:</h1></body></html>\r\n";
-
-  char response[] = "HTTP/1.1 200 OK:\r\n"
-    "Content-Type: text/html; charset=UTF-8\r\n\r\n"
-    "<!DOCTYPE html><html><head><title>404 Not Found</title>"
-    "<body><h1>GOODDDDDDDDD</h1></body></html>\r\n";
 
   char not_implemented[] = "HTTP/1.1 501 Not Implemented: \r\n"
     "Content-Type: text/html; charset=UTF-8\r\n\r\n"
@@ -215,24 +136,33 @@ void send_response(int client, int status_code, struct HTTP_RequestParams *param
       printf("This is a bad http version\n");
       write(client,invalid_version, sizeof(invalid_version) -1);
       break;
-    case BAD_HTTP_VERSION:
+    case 4003:
+      printf("This is a bad http uri\n");
+      write(client,invalid_uri, sizeof(invalid_uri) -1);
       break;
   }
-
-  //printf("This is what the body is returning: %s\n", body);
-  //write(client, body, sizeof(body) -1);
-  //printf("Leaving: send_response()\n\n\n");
 }
 
+/*-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ * construct_file_response - this function is responsible for reading, constructing, and sending files that the user requested. This function is only invoked on a succesful validation of the file path 
+ *----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------*/
 void construct_file_response(char *full_path, int client) {
-  printf("Beginning of: construct_file_response\n\n");
 
-  char response[] = "HTTP/1.1 200 OK:\r\n" "Content-Type: text/html; charset=UTF-8\r\n\r\n";
+  char *user_request_extension;
   char buffer[1024];
   long file_size;
   FILE *requested_file;
-  size_t read_bytes;
-  size_t total_read_bytes;
+  size_t read_bytes, total_read_bytes;
+  user_request_extension = strchr(full_path, '.');
+
+  char png_response[] = "HTTP/1.1 200 OK:\r\n" "Content-Type: image/png; charset=UTF-8\r\n\r\n";
+  char gif_response[] = "HTTP/1.1 200 OK:\r\n" "Content-Type: image/gif; charset=UTF-8\r\n\r\n";
+  char html_response[] = "HTTP/1.1 200 OK:\r\n" "Content-Type: text/html; charset=UTF-8\r\n\r\n";
+  char text_response[] = "HTTP/1.1 200 OK:\r\n" "Content-Type: text/plain; charset=UTF-8\r\n\r\n";
+  char css_response[] = "HTTP/1.1 200 OK:\r\n" "Content-Type: text/css; charset=UTF-8\r\n\r\n";
+  char jpg_response[] = "HTTP/1.1 200 OK:\r\n" "Content-Type: image/jpeg; charset=UTF-8\r\n\r\n";
+  char htm_response[] = "HTTP/1.1 200 OK:\r\n" "Content-Type: text/html; charset=UTF-8\r\n\r\n";
+
 
   requested_file = fopen(full_path, "r");
 
@@ -242,7 +172,27 @@ void construct_file_response(char *full_path, int client) {
   fseek(requested_file, 0, SEEK_SET);
 
  
-  send(client, response, sizeof(response)-1, 0);
+  if ( (strcmp(user_request_extension, ".png")) == 0)
+    send(client, png_response, sizeof(png_response)-1, 0);
+
+  if ( (strcmp(user_request_extension, ".gif")) == 0)
+    send(client, gif_response, sizeof(gif_response)-1, 0);
+
+  if ( (strcmp(user_request_extension, ".html")) == 0)
+    send(client, html_response, sizeof(html_response)-1, 0);
+  
+  if ( (strcmp(user_request_extension, ".jpg")) == 0)
+    send(client, jpg_response, sizeof(jpg_response)-1, 0);
+  
+  if ( (strcmp(user_request_extension, ".text")) == 0)
+    send(client, text_response, sizeof(text_response)-1, 0);
+  
+  if ( (strcmp(user_request_extension, ".css")) == 0)
+    send(client, css_response, sizeof(css_response)-1, 0);
+  
+  if ( (strcmp(user_request_extension, ".htm")) == 0)
+    send(client, htm_response, sizeof(htm_response)-1, 0);
+  
   total_read_bytes = 0;
   while (!feof(requested_file)) {
     printf("More of file to read... %zu bytes read of %zu\n", total_read_bytes, file_size);
@@ -324,12 +274,12 @@ int handle_file_serving(char *path, char *body, struct TextfileData *config_data
 
 
 /*-------------------------------------------------------------------------------------------------------------------------------------------
- * interpret_request - this function will be take the users path and decide what to do based on the result
+ * validate_request_headers - this function will be take the users path and decide what to do based on the result
  *-------------------------------------------------------------------------------------------------------------------------------------------
  */
-int interpret_request(struct HTTP_RequestParams *params, int *decision) {
+int validate_request_headers(struct HTTP_RequestParams *params, int *decision) {
 
-  //printf("Beginning of: interpret_request()\n");
+  //printf("Beginning of: validate_request_headers()\n");
 
   if ( (strcmp(params->method, "GET")) == 0)
   {
@@ -349,15 +299,15 @@ int interpret_request(struct HTTP_RequestParams *params, int *decision) {
     *decision = 4002;
     return 1;
   }
-  //printf("Leaving: interpret_request()\n");
+  //printf("Leaving: validate_request_headers()\n");
   return 0;
 }
 /*-------------------------------------------------------------------------------------------------------------------------------------------
- * extract_request_path - this function will be mainly responsible for parsing and extracting the path from the HTTP request from the client
+ * extract_request_parameters - this function will be mainly responsible for parsing and extracting the path from the HTTP request from the client
  *-------------------------------------------------------------------------------------------------------------------------------------------
  */
-void extract_request_path(char *response, struct HTTP_RequestParams *params) {
- // printf("Beginning of: extract_request_path()\n");
+void extract_request_parameters(char *response, struct HTTP_RequestParams *params) {
+ // printf("Beginning of: extract_request_parameters()\n");
   char *saveptr;
   char *the_path;
 
@@ -378,7 +328,7 @@ void extract_request_path(char *response, struct HTTP_RequestParams *params) {
   //printf( "Remaining tokens after second seperation by space character: \n%s\n", saveptr );
 
   params->httpversion = saveptr;
-  //printf("Leaving: extract_request_path()\n");
+  //printf("Leaving: extract_request_parameters()\n");
 }
 
 /*-------------------------------------------------------------------------------------------------------------------------------------------
@@ -461,6 +411,24 @@ void setup_server(struct TextfileData *config_data)
       strcpy(config_data->extensions[3], current_line);
       removeSubstring(saveptr, "\n");
       strcpy(config_data->encodings[3], saveptr);
+    }
+    if (counter == 12) {
+      current_line = strtok_r(read_line, " ", &saveptr);
+      strcpy(config_data->extensions[4], current_line);
+      removeSubstring(saveptr, "\n");
+      strcpy(config_data->encodings[4], saveptr);
+    }
+    if (counter == 13) {
+      current_line = strtok_r(read_line, " ", &saveptr);
+      strcpy(config_data->extensions[5], current_line);
+      removeSubstring(saveptr, "\n");
+      strcpy(config_data->encodings[5], saveptr);
+    }
+    if (counter == 14) {
+      current_line = strtok_r(read_line, " ", &saveptr);
+      strcpy(config_data->extensions[6], current_line);
+      removeSubstring(saveptr, "\n");
+      strcpy(config_data->encodings[6], saveptr);
     }
     counter++;
   }
