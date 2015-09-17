@@ -9,14 +9,15 @@ int main(int argc, char ** argv)
   struct sockaddr_in client;
   unsigned int sockaddr_len = sizeof(struct sockaddr_in);
 
-
   /* Read in conf file and populate struct */
   setup_server(&system_config_data); 
 
-  printf("CURRENT SERVER SETUP: \n");
-  printf("Port Number: %d\n", system_config_data.port_number);
-  printf("Document Root: %s\n", system_config_data.document_root);
-  printf("Default Web Page: %s\n", system_config_data.default_web_page);
+  printf("---------------------------------------\n");
+  printf("|CURRENT SERVER SETUP: \n");
+  printf("|Port Number: %d\n", system_config_data.port_number);
+  printf("|Document Root: %s\n", system_config_data.document_root);
+  printf("|Default Web Page: %s\n", system_config_data.default_web_page);
+  printf("---------------------------------------\n\n");
 
   /* Create main socket, bind, have it listen */
   main_socket = setup_socket(system_config_data.port_number, MAX_CLIENTS);
@@ -57,7 +58,6 @@ int main(int argc, char ** argv)
  *----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------*/
 void client_handler(int client, struct TextfileData *config_data) {
 
-  printf("Hello from client_handler with process number: %d\n", (int) getpid());
 
   struct HTTP_RequestParams request_params;
   int data_len, status_code;
@@ -71,17 +71,14 @@ void client_handler(int client, struct TextfileData *config_data) {
 
   if (data_len) {
     extract_request_parameters((char *)&data, &request_params);
-    printf("Results of parsing the request body: METHOD: %s  URI: %s  VERSION: %s\n", request_params.method, request_params.URI, request_params.httpversion);
+    printf("- Result parameters from client process ID %d METHOD: %s URI: %s VERSION: %s\n", (int) getpid(), request_params.method, request_params.URI, request_params.httpversion);
     /* Validate request_headers will check for bad URIs, methods, or versions and call send_response to directly to return 500 */
     if (validate_request_headers(&request_params, &status_code))
       send_response(client, status_code, &request_params, (char *)&absolute_file_path);
     else {
       handle_file_serving( (request_params.URI), (char *)&absolute_file_path, config_data, &status_code);
-      //printf("Returned status code is %d\n", status_code);
       send_response(client, status_code, &request_params, (char *)&absolute_file_path);
     }
-    //printf("Checking to see if the file path is being transferred. This is what gets stored in absolute_file_path: %s\n", absolute_file_path);
-    //send_response(client, 200, &request_params);
   }
 }
 /*--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -114,12 +111,11 @@ void send_response(int client, int status_code, struct HTTP_RequestParams *param
   switch (status_code)
   {
     case 501:
-      printf("Printing not implemented page\n");
+      //printf("Printing not implemented page\n");
       write(client, not_implemented, sizeof(not_implemented) -1);
       break;
     case 404:
-      printf("Printing error page\n");
-      //removeSubstring(params->URI, "/");
+      //deleteSubstring(params->URI, "/");
       //sprintf(final_response, not_found, params->URI);
       //printf("The final response should be %s\n", final_response);
       //write(client, final_response, sizeof(final_response) -1);
@@ -162,13 +158,13 @@ void construct_file_response(char *full_path, int client) {
   char css_response[] = "HTTP/1.1 200 OK:\r\n" "Content-Type: text/css; charset=UTF-8\r\n\r\n";
   char jpg_response[] = "HTTP/1.1 200 OK:\r\n" "Content-Type: image/jpeg; charset=UTF-8\r\n\r\n";
   char htm_response[] = "HTTP/1.1 200 OK:\r\n" "Content-Type: text/html; charset=UTF-8\r\n\r\n";
+  char js_response[] = "HTTP/1.1 200 OK:\r\n" "Content-Type: text/javascript; charset=UTF-8\r\n\r\n";
 
 
   requested_file = fopen(full_path, "r");
 
   fseek(requested_file, 0, SEEK_END);
   file_size = ftell(requested_file);
-  printf("File size: %lu\n", file_size);
   fseek(requested_file, 0, SEEK_SET);
 
  
@@ -187,17 +183,19 @@ void construct_file_response(char *full_path, int client) {
   if ( (strcmp(user_request_extension, ".text")) == 0)
     send(client, text_response, sizeof(text_response)-1, 0);
   
-  if ( (strcmp(user_request_extension, ".css")) == 0)
+  if ( (strstr(user_request_extension, ".css")) != NULL)
     send(client, css_response, sizeof(css_response)-1, 0);
   
   if ( (strcmp(user_request_extension, ".htm")) == 0)
     send(client, htm_response, sizeof(htm_response)-1, 0);
+  if ( (strstr(user_request_extension, ".js")) != NULL)
+    send(client, js_response, sizeof(js_response)-1, 0);
   
   total_read_bytes = 0;
   while (!feof(requested_file)) {
-    printf("More of file to read... %zu bytes read of %zu\n", total_read_bytes, file_size);
+    //printf("More of file to read... %zu bytes read of %zu\n", total_read_bytes, file_size);
     read_bytes = fread(buffer, 1, 1024, requested_file);
-    printf("Bytes Read %zu\n", read_bytes);
+    //printf("Bytes Read %zu\n", read_bytes);
     total_read_bytes += read_bytes;
     send(client, buffer, read_bytes, 0);
   }
@@ -213,10 +211,8 @@ void construct_file_response(char *full_path, int client) {
 
 /*--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  * handle_file_serving - this function will take in a file path, and either construct the correct response body to serve up that file or it will return false if the file does not exist
- *--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
- */
+ *-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- */
 int handle_file_serving(char *path, char *body, struct TextfileData *config_data, int *result_status) {
- // printf("Beginning of: handle_file_serving()\n");
 
   int file_supported, i;
   file_supported = FALSE;
@@ -229,12 +225,9 @@ int handle_file_serving(char *path, char *body, struct TextfileData *config_data
   strcat(user_request_file_path, path);
   user_request_extension = strchr(user_request_file_path, '.');
 
-  //printf("This is the path that the user officially requested: %s\n", user_request_file_path);
-  //printf("This is the extension that the user specified: %s\n", strchr(user_request_file_path, '.'));
 
   /* check if user is requesting the root page */
   if ( ((strcmp(path, "/index")) == 0) || ((strcmp(path,"/")) ==0) || ((strcmp(path,"/index.html")) ==0)  ) {
-    //printf("User has requested the main site, time to serve up index.html");
     *result_status = 200;
     strcat(user_request_file_path, "index.html");
     strcpy(body, user_request_file_path);
@@ -243,132 +236,95 @@ int handle_file_serving(char *path, char *body, struct TextfileData *config_data
 
   /* check to see if file requested is of a supported file type */
   for (i = 0; i < NUM_OF_FILE_TYPES; i++) {
-    if ( (strcmp(user_request_extension, config_data->extensions[i])) == 0)
+    if ( (strstr(user_request_extension, config_data->extensions[i])) != NULL)
       file_supported = TRUE;
   }
   if (!file_supported) {
-    printf("File type is not supported, time to print 501\n");
     *result_status = 501;
     strcpy(body, user_request_file_path);
     return(0);
   }
 
-  /* at this point the path requested is neither the home page, nor is it an invalid file type. This means that it must either 
-   * not exist in the directory (return 404) or it must exist and we must serve it up */
   if ( (stat (user_request_file_path, &buffer) == 0)) {
-    printf("YAY FILE EXISTS\n");
-    printf("Time to construct the file and serve it up...");
     *result_status = 200;
     strcpy(body, user_request_file_path);
     return 0;
   }
   else {
-    printf("File not found\n");
     *result_status = 404;
     strcpy(body, user_request_file_path);
     return 0;
   }
-//printf("Leaving: handle_file_serving()\n");
 }
 
 
 
 /*-------------------------------------------------------------------------------------------------------------------------------------------
  * validate_request_headers - this function will be take the users path and decide what to do based on the result
- *-------------------------------------------------------------------------------------------------------------------------------------------
- */
+ *------------------------------------------------------------------------------------------------------------------------------------------- */
 int validate_request_headers(struct HTTP_RequestParams *params, int *decision) {
 
-  //printf("Beginning of: validate_request_headers()\n");
-
-  if ( (strcmp(params->method, "GET")) == 0)
-  {
-    //printf("Valid Method!!\n");
-  }
-  else {
+  if ( (strcmp(params->method, "GET")) != 0) {
     printf("Invalid Method: %s\n", params->method);
     *decision = 4001;
     return 1;
   }
 
-  if (((strncmp(params->httpversion, "HTTP/1.1",8 )) == 0)  || ((strcmp(params->httpversion, "HTTP/1.0")) == 0)) {
-    //printf("Valid Version\n");
-  }
-  else {
-    printf("Uh oh method version not HTTP/1.1 or HTTP/1.0\n");
+  if (((strncmp(params->httpversion, "HTTP/1.1",8 )) != 0)  && ((strcmp(params->httpversion, "HTTP/1.0")) != 0)) {
+    printf("Invalid Version: %s\n", params->httpversion);
     *decision = 4002;
     return 1;
   }
-  //printf("Leaving: validate_request_headers()\n");
   return 0;
 }
 /*-------------------------------------------------------------------------------------------------------------------------------------------
  * extract_request_parameters - this function will be mainly responsible for parsing and extracting the path from the HTTP request from the client
- *-------------------------------------------------------------------------------------------------------------------------------------------
- */
+ *------------------------------------------------------------------------------------------------------------------------------------------- */
 void extract_request_parameters(char *response, struct HTTP_RequestParams *params) {
- // printf("Beginning of: extract_request_parameters()\n");
-  char *saveptr;
-  char *the_path;
+  char *saveptr, *the_path;
 
-  // after this returns, return_path contains the first token while saveptr is a reference to the remaining tokens 
+  /* after this returns, return_path contains the first token while saveptr is a reference to the remaining tokens */
   the_path = strtok_r(response, "\n", &saveptr);
-  //removeSubstring(the_path, "HTTP/1.1");
-  //printf( "First Token after seperating response by newline: \n%s\n", the_path);
-  //printf( "Remaining Tokens after seperating response by newline: \n%s\n", saveptr);
 
   the_path = strtok_r(the_path, " ", &saveptr);
   params->method = the_path;
-  //printf( "First token after seperation by space character: \n%s\n", the_path );
-  //printf( "Remaining tokens after seperation by space character: \n%s\n", saveptr );
 
   the_path = strtok_r(NULL, " ", &saveptr);
-  //printf( "Second token after seperation by space character: %s\n", the_path );
   params->URI = the_path;
-  //printf( "Remaining tokens after second seperation by space character: \n%s\n", saveptr );
 
   params->httpversion = saveptr;
-  //printf("Leaving: extract_request_parameters()\n");
 }
 
 /*-------------------------------------------------------------------------------------------------------------------------------------------
- * removeSubstring - this function is a helper function that is used when extracting the path that the client sends a GET request on
- *-------------------------------------------------------------------------------------------------------------------------------------------
- */
-void removeSubstring(char *s,const char *toremove)
-{
-  while( (s=strstr(s,toremove)) )
-    memmove(s,s+strlen(toremove),1+strlen(s+strlen(toremove)));
+ * deleteSubstring - this function is a helper function that is used when extracting the path that the client sends a GET request on
+ *------------------------------------------------------------------------------------------------------------------------------------------- */
+void deleteSubstring(char *original_string,const char *sub_string) {
+  while( (original_string=strstr(original_string,sub_string)) )
+    memmove(original_string,original_string+strlen(sub_string),1+strlen(original_string+strlen(sub_string)));
 }
 
 /*----------------------------------------------------------------------------------------------
  * setup_server - first function called on entry, prints information and reads in config file 
- *----------------------------------------------------------------------------------------------
- */
-void setup_server(struct TextfileData *config_data)
-{
-  //printf("Beginning of: setup_server()\n");
+ *---------------------------------------------------------------------------------------------- */
+void setup_server(struct TextfileData *config_data) {
 
-  char *current_path;
-  char buff[PATH_MAX + 1];
-  char conf_file_path[PATH_MAX + 1];
-  char read_line[200];
-  char *saveptr;
-  char *current_line;
+  char *current_path, *saveptr, *current_line;
+  char buff[PATH_MAX + 1], conf_file_path[PATH_MAX + 1], read_line[200];
+  int counter = 1;
+
   current_path = getcwd(buff, PATH_MAX + 1);
-
   strcpy(conf_file_path, current_path);
   strcat(conf_file_path, "/ws.conf");
 
 
   FILE *config_file;
   config_file = fopen(conf_file_path, "r");
-  if (config_file == NULL)
-    printf("File was unable to be opened\n");
-  //else
-    //printf("File succesfully opened!!\n");
+  if (config_file == NULL) {
+    perror("Opening conf file: ");
+    exit(-1);
+  }
 
-  int counter = 1;
+    /* TODO -> make this better, such a bad implementation right now */
   /* Hard coded the extraction of attributes from the conf file by referencing the line numebers that I expect each property to be on
    * THIS WILL BREAK IF THE CONF FILE ISN'T IN THE SAME FORMAT */
   while (fgets (read_line,200, config_file) != NULL)
@@ -379,71 +335,72 @@ void setup_server(struct TextfileData *config_data)
     }
     if (counter == 4) {
       current_line = strtok_r(read_line, " ", &saveptr);
-      removeSubstring(saveptr, "\"");
-      removeSubstring(saveptr, "\n");
+      deleteSubstring(saveptr, "\"");
+      deleteSubstring(saveptr, "\n");
       strcpy(config_data->document_root, saveptr);
     }
     if (counter == 6) {
       current_line = strtok_r(read_line, " ", &saveptr);
-      removeSubstring(saveptr, "\n");
+      deleteSubstring(saveptr, "\n");
       strcpy(config_data->default_web_page, saveptr);
     }
     if (counter == 8) {
       current_line = strtok_r(read_line, " ", &saveptr);
       strcpy(config_data->extensions[0], current_line);
-      removeSubstring(saveptr, "\n");
+      deleteSubstring(saveptr, "\n");
       strcpy(config_data->encodings[0], saveptr);
     }
     if (counter == 9) {
       current_line = strtok_r(read_line, " ", &saveptr);
       strcpy(config_data->extensions[1], current_line);
-      removeSubstring(saveptr, "\n");
+      deleteSubstring(saveptr, "\n");
       strcpy(config_data->encodings[1], saveptr);
     }
     if (counter == 10) {
       current_line = strtok_r(read_line, " ", &saveptr);
       strcpy(config_data->extensions[2], current_line);
-      removeSubstring(saveptr, "\n");
+      deleteSubstring(saveptr, "\n");
       strcpy(config_data->encodings[2], saveptr);
     }
     if (counter == 11) {
       current_line = strtok_r(read_line, " ", &saveptr);
       strcpy(config_data->extensions[3], current_line);
-      removeSubstring(saveptr, "\n");
+      deleteSubstring(saveptr, "\n");
       strcpy(config_data->encodings[3], saveptr);
     }
     if (counter == 12) {
       current_line = strtok_r(read_line, " ", &saveptr);
       strcpy(config_data->extensions[4], current_line);
-      removeSubstring(saveptr, "\n");
+      deleteSubstring(saveptr, "\n");
       strcpy(config_data->encodings[4], saveptr);
     }
     if (counter == 13) {
       current_line = strtok_r(read_line, " ", &saveptr);
       strcpy(config_data->extensions[5], current_line);
-      removeSubstring(saveptr, "\n");
+      deleteSubstring(saveptr, "\n");
       strcpy(config_data->encodings[5], saveptr);
     }
     if (counter == 14) {
       current_line = strtok_r(read_line, " ", &saveptr);
       strcpy(config_data->extensions[6], current_line);
-      removeSubstring(saveptr, "\n");
+      deleteSubstring(saveptr, "\n");
       strcpy(config_data->encodings[6], saveptr);
+    }
+    if (counter == 15) {
+      current_line = strtok_r(read_line, " ", &saveptr);
+      strcpy(config_data->extensions[7], current_line);
+      deleteSubstring(saveptr, "\n");
+      strcpy(config_data->encodings[7], saveptr);
     }
     counter++;
   }
-
-
-  //printf("Leaving: setup_server()\n\n");
 }
 
 /*----------------------------------------------------------------------------------------------
  * setup_socket - allocate and bind a server socket using TCP, then have it listen on the port
- *----------------------------------------------------------------------------------------------
- */
+ *---------------------------------------------------------------------------------------------- */
 int setup_socket(int port_number, int max_clients)
 {
-  //printf("Beginning of: setup_socket()\n");
 
   /* The data structure used to hold the address/port information of the server-side socket */
   struct sockaddr_in server;
@@ -461,26 +418,22 @@ int setup_socket(int port_number, int max_clients)
   memset(server.sin_zero, '\0', sizeof(server.sin_zero));
 
   /* Allocate the socket */
-  if ((sock = socket(AF_INET, SOCK_STREAM, 0)) == ERROR)
-  {
+  if ((sock = socket(AF_INET, SOCK_STREAM, 0)) == ERROR) {
     perror("server socket: ");
     exit(-1);
   }
 
 
   /* Bind it to the right port and IP using the sockaddr_in structuer pointed to by &server */
-  if ((bind(sock, (struct sockaddr *)&server, sizeof(struct sockaddr_in))) == ERROR)
-  {
+  if ((bind(sock, (struct sockaddr *)&server, sizeof(struct sockaddr_in))) == ERROR) {
     perror("bind : ");
     exit(-1);
   }
 
   /* Have the socket listen to a max number of max_clients connections on the given port */
-  if ((listen(sock, max_clients)) == ERROR)
-  {
+  if ((listen(sock, max_clients)) == ERROR) {
     perror("Listen");
     exit(-1);
   }
-  //printf("Leaving: setup_socket()\n\n");
   return sock;
 }

@@ -25,7 +25,7 @@
 #define BAD_METHOD 4040
 #define BAD_URI 4041
 #define BAD_HTTP_VERSION 4042
-#define NUM_OF_FILE_TYPES 7
+#define NUM_OF_FILE_TYPES 8
 
 
 /*--------------/
@@ -44,8 +44,8 @@ struct TextfileData {
   int port_number;
   char document_root[MAX_PATH_LENGTH];
   char default_web_page[20];
-  char extensions[8][512];
-  char encodings [8][512];
+  char extensions[NUM_OF_FILE_TYPES+1][512];
+  char encodings [NUM_OF_FILE_TYPES+1][512];
   const char *png[2];
   const char *gif[2];
 
