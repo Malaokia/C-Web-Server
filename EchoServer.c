@@ -193,9 +193,7 @@ void construct_file_response(char *full_path, int client) {
   
   total_read_bytes = 0;
   while (!feof(requested_file)) {
-    //printf("More of file to read... %zu bytes read of %zu\n", total_read_bytes, file_size);
     read_bytes = fread(buffer, 1, 1024, requested_file);
-    //printf("Bytes Read %zu\n", read_bytes);
     total_read_bytes += read_bytes;
     send(client, buffer, read_bytes, 0);
   }
@@ -223,20 +221,29 @@ int handle_file_serving(char *path, char *body, struct TextfileData *config_data
   /* append the user requested path to the document root to obtain the absolute path for files that are being requested */
   strcpy(user_request_file_path, config_data->document_root);
   strcat(user_request_file_path, path);
-  user_request_extension = strchr(user_request_file_path, '.');
+  user_request_extension = strrchr(user_request_file_path, '.');
 
 
   /* check if user is requesting the root page */
   if ( ((strcmp(path, "/index")) == 0) || ((strcmp(path,"/")) ==0) || ((strcmp(path,"/index.html")) ==0)  ) {
+    if ((strcmp(path, "/index")) == 0)
+      strcat(user_request_file_path, ".html");
+    if ((strcmp(path,"/")) ==0)
+      strcat(user_request_file_path, "index.html");
     *result_status = 200;
-    strcat(user_request_file_path, "index.html");
+    strcpy(body, user_request_file_path);
+    return 0;
+  }
+  
+  if (!user_request_extension) {
+    *result_status = 404;
     strcpy(body, user_request_file_path);
     return 0;
   }
 
   /* check to see if file requested is of a supported file type */
   for (i = 0; i < NUM_OF_FILE_TYPES; i++) {
-    if ( (strstr(user_request_extension, config_data->extensions[i])) != NULL)
+    if ( (strcmp(user_request_extension, config_data->extensions[i])) == 0)
       file_supported = TRUE;
   }
   if (!file_supported) {
