@@ -42,6 +42,7 @@ int main(int argc, char ** argv)
     if (pid == 0) {
       close(main_socket);
       client_handler(cli, &system_config_data);
+      close(cli);
       exit(0);
     }
 
@@ -53,6 +54,13 @@ int main(int argc, char ** argv)
   }
 }
 
+/*-------------------------------------------------------------------------------------------------------------------------------------------
+ * deleteSubstring - this function is a helper function that is used when extracting the path that the client sends a GET request on
+ *------------------------------------------------------------------------------------------------------------------------------------------- */
+void deleteSubstring(char *original_string,const char *sub_string) {
+  while( (original_string=strstr(original_string,sub_string)) )
+    memmove(original_string,original_string+strlen(sub_string),1+strlen(original_string+strlen(sub_string)));
+}
 /*----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  * client_handler - this is the function that gets first called by the child (client) process. It receives the initial request and proceeds onward with error handling, parsing, and file serving
  *----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------*/
@@ -86,59 +94,54 @@ void client_handler(int client, struct TextfileData *config_data) {
  *-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- */
 void send_response(int client, int status_code, struct HTTP_RequestParams *params, char *full_path) {
 
-  char invalid_version[] = "HTTP/1.1 400 Bad Request: Invalid Version\r\n"
-    "Content-Type: text/html; charset=UTF-8\r\n\r\n";
-
-  char invalid_uri[] = "HTTP/1.1 400 Bad Request: Invalid URI\r\n"
-    "Content-Type: text/html; charset=UTF-8\r\n\r\n";
-
-  char invalid_method[] = "HTTP/1.1 400 Bad Request: Invalid Method\r\n"
-    "Content-Type: text/html; charset=UTF-8\r\n\r\n";
+  char invalid_version[] = "HTTP/1.1 400 Bad Request: Invalid Version: %s\r\n";
+  char invalid_uri[] = "HTTP/1.1 400 Bad Request: Invalid URI: %s\r\n";
+  char invalid_method[] = "HTTP/1.1 400 Bad Request: Invalid Method: %s\r\n";
 
   char not_found[] = "HTTP/1.1 404 Not Found:%s\r\n"
     "Content-Type: text/html; charset=UTF-8\r\n\r\n"
     "<!DOCTYPE html><html><head><title>404 Not Found</title>"
-    "<body><h1>404 Not Found:</h1></body></html>\r\n";
+    "<body><h1>404 Not Found:%s</h1></body></html>\r\n";
 
-  char not_implemented[] = "HTTP/1.1 501 Not Implemented: \r\n"
+  char not_implemented[] = "HTTP/1.1 501 Not Implemented: %s\r\n"
     "Content-Type: text/html; charset=UTF-8\r\n\r\n"
     "<!DOCTYPE html><html><head><title>501 Not Implemented</title>"
-    "<body><h1>501 Not Implemented</h1></body></html>\r\n";
+    "<body><h1>501 Not Implemented: %s</h1></body></html>\r\n";
 
-  //sprintf((char *)&actual_response, not_found, params->URI);
-
+  char actual_response[sizeof(not_implemented) + (2*(sizeof(params->URI))) +256];
 
   switch (status_code)
   {
     case 501:
-      //printf("Printing not implemented page\n");
-      write(client, not_implemented, sizeof(not_implemented) -1);
+      snprintf(actual_response, sizeof(actual_response), not_implemented, params->URI, params->URI);
+      write(client, actual_response, sizeof(actual_response));
       break;
     case 404:
-      //deleteSubstring(params->URI, "/");
-      //sprintf(final_response, not_found, params->URI);
-      //printf("The final response should be %s\n", final_response);
-      //write(client, final_response, sizeof(final_response) -1);
-      write(client, not_found, sizeof(not_found) -1);
+      snprintf(actual_response, sizeof(actual_response), not_found, params->URI, params->URI);
+      write(client, actual_response, sizeof(actual_response));
       break;
     case 200:
       construct_file_response(full_path, client);
       break;
     case 4001:
       printf("This is a bad http method\n");
-      write(client,invalid_method, sizeof(invalid_method) -1);
+      snprintf(actual_response, ( sizeof(invalid_method) + ( (sizeof(params->method))*2)), invalid_method, params->method, params->method);
+      write(client,actual_response, ( sizeof(invalid_method) + ( (sizeof(params->method))*2)));
       break;
     case 4002:
       printf("This is a bad http version\n");
-      write(client,invalid_version, sizeof(invalid_version) -1);
+      snprintf(actual_response, sizeof(actual_response), invalid_version, params->httpversion);
+      write(client,actual_response, sizeof(actual_response));
       break;
     case 4003:
       printf("This is a bad http uri\n");
-      write(client,invalid_uri, sizeof(invalid_uri) -1);
+      snprintf(actual_response, sizeof(actual_response), invalid_uri, params->method);
+      write(client,actual_response, sizeof(actual_response));
       break;
   }
 }
 
+/* TODO -> refactor so that there isn't so much hardcoding / repitition */
 /*-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  * construct_file_response - this function is responsible for reading, constructing, and sending files that the user requested. This function is only invoked on a succesful validation of the file path 
  *----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------*/
@@ -199,7 +202,6 @@ void construct_file_response(char *full_path, int client) {
   }
   fclose(requested_file);
 
-      //sprintf(final_response, not_found, params->URI);
 
 
 }
@@ -302,13 +304,6 @@ void extract_request_parameters(char *response, struct HTTP_RequestParams *param
   params->httpversion = saveptr;
 }
 
-/*-------------------------------------------------------------------------------------------------------------------------------------------
- * deleteSubstring - this function is a helper function that is used when extracting the path that the client sends a GET request on
- *------------------------------------------------------------------------------------------------------------------------------------------- */
-void deleteSubstring(char *original_string,const char *sub_string) {
-  while( (original_string=strstr(original_string,sub_string)) )
-    memmove(original_string,original_string+strlen(sub_string),1+strlen(original_string+strlen(sub_string)));
-}
 
 /*----------------------------------------------------------------------------------------------
  * setup_server - first function called on entry, prints information and reads in config file 
