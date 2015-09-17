@@ -228,10 +228,11 @@ void construct_file_response(char *full_path, int client) {
   printf("Beginning of: construct_file_response\n\n");
 
   char response[] = "HTTP/1.1 200 OK:\r\n" "Content-Type: text/html; charset=UTF-8\r\n\r\n";
-  char buffer[32];
+  char buffer[1024];
   long file_size;
   FILE *requested_file;
   size_t read_bytes;
+  size_t total_read_bytes;
 
   requested_file = fopen(full_path, "r");
 
@@ -241,15 +242,19 @@ void construct_file_response(char *full_path, int client) {
   fseek(requested_file, 0, SEEK_SET);
 
  
-  read_bytes = fread(buffer, 1, 32, requested_file);
-  printf("%s\n", buffer);
-  printf("Bytes Read %zu\n", read_bytes);
+  send(client, response, sizeof(response)-1, 0);
+  total_read_bytes = 0;
+  while (!feof(requested_file)) {
+    printf("More of file to read... %zu bytes read of %zu\n", total_read_bytes, file_size);
+    read_bytes = fread(buffer, 1, 1024, requested_file);
+    printf("Bytes Read %zu\n", read_bytes);
+    total_read_bytes += read_bytes;
+    send(client, buffer, read_bytes, 0);
+  }
   fclose(requested_file);
 
       //sprintf(final_response, not_found, params->URI);
 
-      send(client, response, sizeof(response)-1, 0);
-      send(client, buffer, read_bytes, 0);
 
 }
 
