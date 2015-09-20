@@ -42,7 +42,7 @@ int main(int argc, char ** argv)
     if (pid == 0) {
       close(main_socket);
       client_handler(cli, &system_config_data);
-      close(cli);
+      //close(cli);
       exit(0);
     }
 
@@ -50,6 +50,7 @@ int main(int argc, char ** argv)
      * it has no need to maintain active sockets with all clients */
     if (pid > 0) {
       close(cli);
+      waitpid(0, NULL, WNOHANG);
     }
   }
 }
@@ -65,7 +66,6 @@ void deleteSubstring(char *original_string,const char *sub_string) {
  * client_handler - this is the function that gets first called by the child (client) process. It receives the initial request and proceeds onward with error handling, parsing, and file serving
  *----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------*/
 void client_handler(int client, struct TextfileData *config_data) {
-
 
   struct HTTP_RequestParams request_params;
   int data_len, status_code;
@@ -87,7 +87,11 @@ void client_handler(int client, struct TextfileData *config_data) {
       handle_file_serving( (request_params.URI), (char *)&absolute_file_path, config_data, &status_code);
       send_response(client, status_code, &request_params, (char *)&absolute_file_path);
     }
+    free(request_params.method);
+    free(request_params.URI);
+    free(request_params.httpversion);
   }
+
 }
 /*--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  * send_response - this function will be the function that actually sends a message to the client. This message will contain the proper headers and the respective body content
@@ -109,6 +113,8 @@ void send_response(int client, int status_code, struct HTTP_RequestParams *param
     "<body><h1>501 Not Implemented: %s</h1></body></html>\r\n";
 
   char actual_response[sizeof(not_implemented) + (2*(sizeof(params->URI))) +256];
+  /* memset here will zero out the bytes of actual_response to supress valgrind warnings about uninitalized bytes */
+  memset(&actual_response, 0, sizeof(actual_response));
 
   switch (status_code)
   {
@@ -296,12 +302,15 @@ void extract_request_parameters(char *response, struct HTTP_RequestParams *param
   the_path = strtok_r(response, "\n", &saveptr);
 
   the_path = strtok_r(the_path, " ", &saveptr);
-  params->method = the_path;
+  params->method = malloc(strlen(the_path)+1);
+  strcpy(params->method, the_path);
 
   the_path = strtok_r(NULL, " ", &saveptr);
-  params->URI = the_path;
+  params->URI = malloc(strlen(the_path)+1);
+  strcpy(params->URI, the_path);
 
-  params->httpversion = saveptr;
+  params->httpversion = malloc(strlen(saveptr)+1);
+  strcpy(params->httpversion, saveptr);
 }
 
 
