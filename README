@@ -1,0 +1,32 @@
+Author: Alex Tzinov
+Date: September 2015
+Class: Network Systems CSCI 4273/5273
+
+
+*|---------------~|*
+*|  TCP C Server  |*
+*|---------------~|*
+
+
+To Build:
+  gcc -g -Wall EchoServer.c  -lpthread -o server
+
+To Run:
+  ./server
+
+To Configure:
+  Edit ws.conf file to specify document root, default index page, supported filetypes, etc
+
+
+Basic Socket Flow:
+
+  socket() = create the socket
+          ||
+          \/
+  bind() = bind the server socket to a specific IP address and port number
+          ||
+          \/
+  listen() = open up the socket to listen to incoming client connections
+          ||
+          \/
+  accept() = accept a client connection, return an instance of a new client socket
