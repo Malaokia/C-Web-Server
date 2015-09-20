@@ -46,9 +46,6 @@ struct TextfileData {
   char default_web_page[20];
   char extensions[NUM_OF_FILE_TYPES+1][512];
   char encodings [NUM_OF_FILE_TYPES+1][512];
-  const char *png[2];
-  const char *gif[2];
-
 };
 
 /* Function Declarations */

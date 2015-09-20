@@ -396,6 +396,7 @@ void setup_server(struct TextfileData *config_data) {
     }
     counter++;
   }
+  fclose(config_file);
 }
 
 /*----------------------------------------------------------------------------------------------
